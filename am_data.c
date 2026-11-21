@@ -615,3 +615,31 @@ int am_calc_distance_km(int ap1_idx, int ap2_idx) {
     if (km > 19800) km = 19800;
     return km;
 }
+
+const char *am_aircraft_engine_name(int model_idx) {
+    const AircraftModel *m = am_aircraft_get(model_idx);
+    if (strstr(m->model, "A220")) return "PW1500G GTF";
+    if (strstr(m->model, "A320neo") || strstr(m->model, "A321neo") || strstr(m->model, "A321LR") || strstr(m->model, "A321XLR") || strstr(m->model, "A319neo")) return "CFM LEAP-1A";
+    if (strstr(m->model, "A320") || strstr(m->model, "A321") || strstr(m->model, "A319") || strstr(m->model, "A318")) return "IAE V2500";
+    if (strstr(m->model, "A330-800") || strstr(m->model, "A330-900")) return "RR Trent 7000";
+    if (strstr(m->model, "A330")) return "RR Trent 700";
+    if (strstr(m->model, "A340")) return "RR Trent 500";
+    if (strstr(m->model, "A350")) return "RR Trent XWB";
+    if (strstr(m->model, "A380")) return "RR Trent 900";
+    if (strstr(m->model, "737 MAX")) return "CFM LEAP-1B";
+    if (strstr(m->model, "737")) return "CFM56-7B27";
+    if (strstr(m->model, "747-8")) return "GEnx-2B67";
+    if (strstr(m->model, "747")) return "PW4056 / RB211";
+    if (strstr(m->model, "777-8") || strstr(m->model, "777-9")) return "GE9X-105B1A";
+    if (strstr(m->model, "777")) return "GE90-115B";
+    if (strstr(m->model, "787")) return "GEnx-1B / Trent 1000";
+    if (strstr(m->model, "757")) return "RR RB211-535E4";
+    if (strstr(m->model, "767")) return "GE CF6-80C2";
+    if (strstr(m->model, "Concorde")) return "RR Olympus 593";
+    if (strstr(m->model, "E19") || strstr(m->model, "E17")) return "GE CF34 / PW1900G";
+    if (strstr(m->model, "ATR")) return "PW127M Turboprop";
+    if (strstr(m->model, "Dash")) return "PW150A Turboprop";
+    if (strstr(m->model, "C919")) return "CFM LEAP-1C";
+    if (strstr(m->model, "An-225") || strstr(m->model, "An-124")) return "Progress D-18T";
+    return "High-Bypass Turbofan";
+}

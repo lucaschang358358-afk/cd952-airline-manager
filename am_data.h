@@ -50,6 +50,7 @@ int         am_airports_in_country(const char *code, int *out_idxs, int max_n);
 int  am_aircraft_count(void);
 const AircraftModel *am_aircraft_get(int idx);
 const char *am_mfg_name(int mfg);
+const char *am_aircraft_engine_name(int model_idx);
 
 int  am_calc_distance_km(int ap1_idx, int ap2_idx);
 

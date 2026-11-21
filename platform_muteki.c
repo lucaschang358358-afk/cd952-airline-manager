@@ -261,7 +261,7 @@ void hal_present(void) {
 
 int64_t hal_get_unix_time(void) { return (int64_t)time(NULL); }
 uint32_t hal_get_seed(void) { return (uint32_t)time(NULL) ^ 0xA4414952u; }
-const char *hal_get_save_path(void) { return "C:\\cd952_am4_v2.sav"; }
+const char *hal_get_save_path(void) { return "C:\\cd952_am4_v3.sav"; }
 const char *hal_get_extra_airports_csv(void) { return "C:\\airports.csv"; }
 void hal_request_quit(void) { g_running = 0; }
 

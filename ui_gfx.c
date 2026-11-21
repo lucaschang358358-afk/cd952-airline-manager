@@ -141,7 +141,24 @@ void ui_draw_str(int x, int y, const char *utf8, int max_w, uint32_t rgb) {
     if (utf8 && utf8[0]) hal_draw_line_utf8(x, y, utf8, (int)strlen(utf8), max_w, rgb);
 }
 
-/* 等距圓柱投影 (lon: -1800..1800, lat: 850..-600) */
+/* 藍天白雲明亮開場背景 (還原截圖 1 的雲海氛圍!) */
+void ui_draw_daylight_sky_clouds(int w, int h) {
+    for (int y = 0; y < h; y++) {
+        int p = (y * 100) / (h > 1 ? h : 1);
+        uint32_t col = ui_blend(0x5DA9E9, 0xDCEEFB, p);
+        hal_fill_rect(0, y, w, 1, col);
+    }
+    /* 柔和立體白雲層 */
+    static const int CLOUDS[9][3] = {
+        { 90, 390, 88 }, { 210, 420, 105 }, { 360, 405, 92 }, { 520, 430, 110 },
+        { 680, 395, 95 }, { 770, 430, 85 }, { 120, 95, 58 }, { 690, 110, 66 }, { 420, 65, 50 }
+    };
+    for (int i = 0; i < 9; i++) {
+        hal_fill_circle(CLOUDS[i][0], CLOUDS[i][1] + 8, CLOUDS[i][2], 0xD2E4F3);
+        hal_fill_circle(CLOUDS[i][0], CLOUDS[i][1],     CLOUDS[i][2], 0xF5FAFE);
+    }
+}
+
 void ui_latlon_to_xy(int lat10, int lon10, int mx, int my, int mw, int mh, int *ox, int *oy) {
     int x = mx + ((lon10 + 1800) * mw) / 3600;
     int y = my + ((820 - lat10) * mh) / 1420;
@@ -164,8 +181,7 @@ static void fill_poly_latlon(const int16_t *pts, int n, int mx, int my, int mw, 
     for (int y = min_y; y <= max_y; y++) {
         int xs[24], cnt = 0;
         for (int i = 0; i < n; i++) {
-            int j = (i + 1) % n;
-            int y0 = py[i], y1 = py[j];
+            int j = (i + 1) % n, y0 = py[i], y1 = py[j];
             if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
                 int ix = px[i] + ((y - y0) * (px[j] - px[i])) / (y1 - y0);
                 if (cnt < 24) xs[cnt++] = ix;
@@ -178,25 +194,21 @@ static void fill_poly_latlon(const int16_t *pts, int n, int mx, int my, int mw, 
             if (xs[a + 1] > xs[a]) hal_fill_rect(xs[a], y, xs[a + 1] - xs[a], 1, fill);
         }
     }
-    for (int i = 0; i < n; i++) {
-        int j = (i + 1) % n;
-        hal_draw_line(px[i], py[i], px[j], py[j], edge);
-    }
+    for (int i = 0; i < n; i++) { int j = (i + 1) % n; hal_draw_line(px[i], py[i], px[j], py[j], edge); }
 }
 
-void ui_draw_world_map(int mx, int my, int mw, int mh) {
-    /* 1. 深海雷達底色與經緯網格 */
-    hal_fill_rect(mx, my, mw, mh, 0x081424);
+/* 明亮日間航空地圖 (對標截圖 2/3/4：清澈天藍海水 + 自然地形綠與暖沙陸地!) */
+void ui_draw_world_map_daylight(int mx, int my, int mw, int mh) {
+    hal_fill_rect(mx, my, mw, mh, 0x9BD8EC);
     for (int lon = -1500; lon <= 1500; lon += 300) {
         int x, y; ui_latlon_to_xy(0, lon, mx, my, mw, mh, &x, &y);
-        hal_fill_rect(x, my, 1, mh, 0x0F233A);
+        hal_fill_rect(x, my, 1, mh, 0x8CCCE0);
     }
     for (int lat = -300; lat <= 600; lat += 300) {
         int x, y; ui_latlon_to_xy(lat, 0, mx, my, mw, mh, &x, &y);
-        hal_fill_rect(mx, y, mw, 1, (lat == 0) ? 0x163554 : 0x0F233A);
+        hal_fill_rect(mx, y, mw, 1, (lat == 0) ? 0x7EC0D6 : 0x8CCCE0);
     }
 
-    /* 2. 七大洲精緻簡化多邊形輪廓 (lat*10, lon*10) */
     static const int16_t NAMERICA[] = {
         700,-1650, 720,-1300, 680,-900, 580,-620, 450,-600, 300,-810, 250,-800,
         290,-950, 200,-970, 90,-790, 150,-930, 230,-1060, 320,-1170, 490,-1250, 600,-1450
@@ -228,144 +240,119 @@ void ui_draw_world_map(int mx, int my, int mw, int mh) {
     };
     static const int16_t NZ[] = { -350,1730, -380,1780, -460,1680, -430,1700 };
 
-    uint32_t land = 0x16304B, border = 0x29527A;
-    fill_poly_latlon(NAMERICA, 15, mx, my, mw, mh, land, border);
-    fill_poly_latlon(GREENLAND, 5, mx, my, mw, mh, land, border);
-    fill_poly_latlon(SAMERICA, 11, mx, my, mw, mh, land, border);
-    fill_poly_latlon(EUROPE,   12, mx, my, mw, mh, land, border);
-    fill_poly_latlon(UK,        4, mx, my, mw, mh, land, border);
-    fill_poly_latlon(AFRICA,   13, mx, my, mw, mh, land, border);
-    fill_poly_latlon(ASIA,     21, mx, my, mw, mh, land, border);
-    fill_poly_latlon(JAPAN,     6, mx, my, mw, mh, land, border);
-    fill_poly_latlon(SEASIA,    6, mx, my, mw, mh, land, border);
-    fill_poly_latlon(AUSTRALIA, 9, mx, my, mw, mh, land, border);
-    fill_poly_latlon(NZ,        4, mx, my, mw, mh, land, border);
-
-    hal_draw_rect(mx, my, mw, mh, 0x1E3A5F);
+    fill_poly_latlon(NAMERICA, 15, mx, my, mw, mh, 0xB5D48E, 0x7BA668);
+    fill_poly_latlon(GREENLAND, 5, mx, my, mw, mh, 0xE6EFEA, 0xA8C0B8);
+    fill_poly_latlon(SAMERICA, 11, mx, my, mw, mh, 0xA7CE82, 0x6F9E5D);
+    fill_poly_latlon(EUROPE,   12, mx, my, mw, mh, 0xB8D690, 0x7DA86B);
+    fill_poly_latlon(UK,        4, mx, my, mw, mh, 0xB8D690, 0x7DA86B);
+    fill_poly_latlon(AFRICA,   13, mx, my, mw, mh, 0xD6CE9A, 0xA59E6E);
+    fill_poly_latlon(ASIA,     21, mx, my, mw, mh, 0xBFD698, 0x84A66E);
+    fill_poly_latlon(JAPAN,     6, mx, my, mw, mh, 0xA8CE82, 0x6F9E5D);
+    fill_poly_latlon(SEASIA,    6, mx, my, mw, mh, 0x9ECB7C, 0x679A55);
+    fill_poly_latlon(AUSTRALIA, 9, mx, my, mw, mh, 0xD2CB92, 0x9F9966);
+    fill_poly_latlon(NZ,        4, mx, my, mw, mh, 0xA8CE82, 0x6F9E5D);
 }
 
-/* 繪製優美大圓弧線航路 + 即時移動飛機光點 */
 void ui_draw_route_arc(int lat1, int lon1, int lat2, int lon2, int mx, int my, int mw, int mh,
-                       int progress_pct, uint32_t arc_col, uint32_t plane_col) {
+                       int progress_pct, int is_return_leg, uint32_t arc_col, uint32_t plane_col) {
     int x0, y0, x1, y1;
     ui_latlon_to_xy(lat1, lon1, mx, my, mw, mh, &x0, &y0);
     ui_latlon_to_xy(lat2, lon2, mx, my, mw, mh, &x1, &y1);
+    if (is_return_leg) { int tx = x0; x0 = x1; x1 = tx; int ty = y0; y0 = y1; y1 = ty; }
 
-    int dx = x1 - x0;
-    int lift = abs(dx) / 5;
-    if (lift > 42) lift = 42;
-    /* 貝茲二次曲線近似極地大圓弧線 */
-    int cx = (x0 + x1) / 2;
-    int cy = (y0 + y1) / 2 - lift;
+    int dx = x1 - x0, lift = abs(dx) / 5; if (lift > 42) lift = 42;
+    int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 - lift;
     if (cy < my + 4) cy = my + 4;
 
     int prev_x = x0, prev_y = y0;
-    int px_plane = x0, py_plane = y0;
     const int STEPS = 12;
     for (int i = 1; i <= STEPS; i++) {
-        int t = (i * 100) / STEPS;
-        int it = 100 - t;
+        int t = (i * 100) / STEPS, it = 100 - t;
         int bx = (it * it * x0 + 2 * it * t * cx + t * t * x1) / 10000;
         int by = (it * it * y0 + 2 * it * t * cy + t * t * y1) / 10000;
         hal_draw_line(prev_x, prev_y, bx, by, arc_col);
+        hal_draw_line(prev_x, prev_y + 1, bx, by + 1, arc_col);
         prev_x = bx; prev_y = by;
     }
-
     if (progress_pct >= 0 && progress_pct <= 100) {
         int t = progress_pct, it = 100 - t;
-        px_plane = (it * it * x0 + 2 * it * t * cx + t * t * x1) / 10000;
-        py_plane = (it * it * y0 + 2 * it * t * cy + t * t * y1) / 10000;
-        hal_fill_circle(px_plane, py_plane, 4, plane_col);
-        hal_fill_circle(px_plane, py_plane, 2, 0xFFFFFF);
+        int px = (it * it * x0 + 2 * it * t * cx + t * t * x1) / 10000;
+        int py = (it * it * y0 + 2 * it * t * cy + t * t * y1) / 10000;
+        hal_fill_circle(px, py, 5, 0x1E293B);
+        hal_fill_circle(px, py, 4, plane_col);
+        hal_fill_circle(px, py, 2, 0xFFFFFF);
     }
 }
 
-void ui_draw_sparkline(int x, int y, int w, int h, const int *vals, int count, uint32_t line_col, uint32_t grid_col) {
-    ui_fill_rrect(x, y, w, h, 8, 0x0B1320);
-    ui_draw_rrect(x, y, w, h, 8, grid_col);
+void ui_draw_sparkline_light(int x, int y, int w, int h, const int *vals, int count, uint32_t line_col) {
+    ui_fill_rrect(x, y, w, h, 8, 0xF8FAFC);
+    ui_draw_rrect(x, y, w, h, 8, 0xCBD5E1);
     if (!vals || count < 2) return;
-
     int vmin = vals[0], vmax = vals[0];
-    for (int i = 1; i < count; i++) {
-        if (vals[i] < vmin) vmin = vals[i];
-        if (vals[i] > vmax) vmax = vals[i];
-    }
+    for (int i = 1; i < count; i++) { if (vals[i] < vmin) vmin = vals[i]; if (vals[i] > vmax) vmax = vals[i]; }
     if (vmax == vmin) vmax = vmin + 10;
-
-    hal_fill_rect(x + 8, y + h / 2, w - 16, 1, 0x16263D);
-
+    hal_fill_rect(x + 8, y + h / 2, w - 16, 1, 0xE2E8F0);
     int px = -1, py = -1;
     for (int i = 0; i < count; i++) {
         int cx = x + 10 + (i * (w - 20)) / (count - 1);
         int cy = y + h - 10 - ((vals[i] - vmin) * (h - 20)) / (vmax - vmin);
-        if (px >= 0) {
-            hal_draw_line(px, py, cx, cy, line_col);
-            hal_draw_line(px, py + 1, cx, cy + 1, line_col);
-        }
+        if (px >= 0) { hal_draw_line(px, py, cx, cy, line_col); hal_draw_line(px, py + 1, cx, cy + 1, line_col); }
         px = cx; py = cy;
     }
-    if (px >= 0) hal_fill_circle(px, py, 3, 0xFFFFFF);
+    if (px >= 0) hal_fill_circle(px, py, 3, line_col);
 }
 
-/* 繪製精緻飛機側面輪廓剪影 (0=螺旋槳, 1=支線噴射, 2=窄體客機, 3=寬體雙發, 4=雙層四發巨無霸, 5=超音速協和, 6=重型貨機) */
-void ui_draw_aircraft_silhouette(int cx, int cy, int w, int h, int sil_type, uint32_t body, uint32_t accent) {
-    /* 藍圖背景格線 */
+/* 明亮日間白底展示卡客機插圖 (對標截圖 1 A320 / B737 展示圖!) */
+void ui_draw_aircraft_card_art(int cx, int cy, int w, int h, int sil_type, uint32_t tail_col) {
     int x0 = cx - w / 2, y0 = cy - h / 2;
-    ui_fill_rrect(x0, y0, w, h, 10, 0x091526);
-    ui_draw_rrect(x0, y0, w, h, 10, 0x1E3A5F);
-    for (int gx = x0 + 18; gx < x0 + w - 8; gx += 20) hal_fill_rect(gx, y0 + 2, 1, h - 4, 0x10233B);
-    for (int gy = y0 + 14; gy < y0 + h - 6; gy += 16) hal_fill_rect(x0 + 2, gy, w - 4, 1, 0x10233B);
+    ui_fill_rrect(x0, y0, w, h, 8, 0xEEF6FC);
+    ui_draw_rrect(x0, y0, w, h, 8, 0xCBD5E1);
 
-    int fuse_l = (w * 68) / 100;
-    int fx = cx - fuse_l / 2;
-    int fy = cy + 4;
-    int fh = (sil_type == 4) ? 20 : ((sil_type == 3 || sil_type == 6) ? 16 : ((sil_type == 5) ? 9 : 12));
+    int fuse_l = (w * 72) / 100;
+    int fx = cx - fuse_l / 2, fy = cy + 6;
+    int fh = (sil_type == 4) ? 20 : ((sil_type == 3 || sil_type == 6) ? 16 : ((sil_type == 5) ? 9 : 13));
 
-    /* 垂直尾翼 */
-    int tx = fx + 6, tw = 22, th = (sil_type == 4) ? 28 : 22;
+    /* 彩色垂直尾翼 */
+    int tx = fx + 6, tw = 22, th = (sil_type == 4) ? 26 : 20;
     for (int dy = 0; dy < th; dy++) {
         int s = (dy * 10) / th;
-        hal_fill_rect(tx - 6 + s, fy - dy, tw - s / 2, 1, accent);
+        hal_fill_rect(tx - 6 + s, fy - dy, tw - s / 2, 1, tail_col);
     }
 
-    /* 機身主體 + 圓潤機鼻 */
-    ui_fill_rrect(fx, fy - fh / 2, fuse_l, fh, fh / 2, body);
+    /* 白色立體機身 + 淡藍下腹 */
+    ui_fill_rrect(fx, fy - fh / 2, fuse_l, fh, fh / 2, 0xFFFFFF);
+    ui_draw_rrect(fx, fy - fh / 2, fuse_l, fh, fh / 2, 0x94A3B8);
+    hal_fill_rect(fx + 10, fy + fh / 2 - 3, fuse_l - 20, 3, 0xCBD5E1);
+
     if (sil_type == 5) {
-        /* 協和號尖銳超音速機鼻 */
-        for (int dx = 0; dx < 26; dx++) {
-            int hh = (fh * (26 - dx)) / 26;
-            hal_fill_rect(fx + fuse_l - 6 + dx, fy - hh / 2 + 1, 1, hh > 1 ? hh : 1, body);
+        for (int dx = 0; dx < 22; dx++) {
+            int hh = (fh * (22 - dx)) / 22;
+            hal_fill_rect(fx + fuse_l - 5 + dx, fy - hh / 2 + 1, 1, hh > 1 ? hh : 1, 0xFFFFFF);
         }
     } else if (sil_type == 4) {
-        /* 雙層客艙 / 747 上層隆起 */
-        ui_fill_rrect(fx + fuse_l / 3, fy - fh / 2 - 5, (fuse_l * 55) / 100, 10, 5, body);
+        ui_fill_rrect(fx + fuse_l / 3, fy - fh / 2 - 5, (fuse_l * 52) / 100, 9, 4, 0xFFFFFF);
+        ui_draw_rrect(fx + fuse_l / 3, fy - fh / 2 - 5, (fuse_l * 52) / 100, 9, 4, 0x94A3B8);
     }
 
-    /* 駕駛艙黑窗與客艙窗排 */
-    hal_fill_rect(fx + fuse_l - 16, fy - fh / 2 + 2, 8, 4, 0x0F172A);
+    /* 駕駛艙黑窗 + 客艙藍窗 */
+    hal_fill_rect(fx + fuse_l - 15, fy - fh / 2 + 2, 8, 4, 0x1E293B);
     if (sil_type != 6) {
-        for (int wx = fx + 26; wx < fx + fuse_l - 24; wx += 7) {
-            hal_fill_rect(wx, fy - 2, 4, 3, 0x1E293B);
-            if (sil_type == 4 && wx > fx + fuse_l / 3 + 4) hal_fill_rect(wx, fy - 8, 4, 2, 0x1E293B);
+        for (int wx = fx + 24; wx < fx + fuse_l - 22; wx += 7) {
+            hal_fill_rect(wx, fy - 2, 4, 3, 0x3B82F6);
+            if (sil_type == 4 && wx > fx + fuse_l / 3 + 4) hal_fill_rect(wx, fy - 8, 4, 2, 0x3B82F6);
         }
     } else {
-        /* 貨機大貨艙門標記 */
-        hal_draw_rect(fx + 28, fy - fh / 2 + 2, 26, fh - 4, accent);
-        hal_fill_rect(fx + 20, fy + 1, fuse_l - 38, 3, accent);
+        hal_draw_rect(fx + 26, fy - fh / 2 + 2, 26, fh - 4, tail_col);
+        hal_fill_rect(fx + 18, fy + 1, fuse_l - 34, 3, tail_col);
     }
 
-    /* 機翼與發動機 */
-    int wx = cx - 10;
-    hal_fill_rect(wx - 12, fy + 2, 34, 5, ui_blend(body, 0x000000, 25));
-    if (sil_type == 0) {
-        /* 螺旋槳 */
-        hal_fill_rect(wx + 8, fy - 12, 2, 26, 0xCBD5E1);
-    } else if (sil_type == 1) {
-        /* 尾吊發動機 */
-        ui_fill_rrect(fx + 16, fy - 7, 14, 6, 3, 0x94A3B8);
-    } else {
-        /* 翼下渦扇發動機 */
-        ui_fill_rrect(wx - 2, fy + 5, 16, 7, 3, 0x94A3B8);
-        if (sil_type == 4) ui_fill_rrect(wx - 16, fy + 4, 13, 6, 3, 0x64748B);
+    /* 機翼與渦扇發動機 */
+    int wx = cx - 8;
+    hal_fill_rect(wx - 12, fy + 2, 34, 5, 0x94A3B8);
+    if (sil_type == 0) hal_fill_rect(wx + 8, fy - 11, 2, 24, 0x475569);
+    else if (sil_type == 1) ui_fill_rrect(fx + 16, fy - 7, 14, 6, 3, 0x64748B);
+    else {
+        ui_fill_rrect(wx - 2, fy + 5, 16, 7, 3, 0x64748B);
+        if (sil_type == 4) ui_fill_rrect(wx - 16, fy + 4, 13, 6, 3, 0x475569);
     }
 }

@@ -14,14 +14,17 @@ int  ui_ascii_width(const char *str, int scale);
 void ui_draw_badge(int x, int y, const char *tag, uint32_t bg, uint32_t fg);
 void ui_draw_str(int x, int y, const char *utf8, int max_w, uint32_t rgb);
 
-/* 繪製暗黑航空雷達世界地圖 (經緯度投影至地圖矩形) */
-void ui_draw_world_map(int mx, int my, int mw, int mh);
+/* 明亮日間航空世界地圖 (天藍海洋 + 自然綠/沙黃陸地，完全對標 AM4 官網!) */
+void ui_draw_daylight_sky_clouds(int w, int h);
+void ui_draw_world_map_daylight(int mx, int my, int mw, int mh);
 void ui_latlon_to_xy(int lat10, int lon10, int mx, int my, int mw, int mh, int *ox, int *oy);
 void ui_draw_route_arc(int lat1, int lon1, int lat2, int lon2, int mx, int my, int mw, int mh,
-                       int progress_pct, uint32_t arc_col, uint32_t plane_col);
+                       int progress_pct, int is_return_leg, uint32_t arc_col, uint32_t plane_col);
 
-/* 繪製迷你折線走勢圖 (油價 / CO2 / 股價) */
-void ui_draw_sparkline(int x, int y, int w, int h, const int *vals, int count, uint32_t line_col, uint32_t grid_col);
+/* 亮白底折線走勢圖 (油價 / CO2 / 股價) */
+void ui_draw_sparkline_light(int x, int y, int w, int h, const int *vals, int count, uint32_t line_col);
 
-void ui_draw_aircraft_silhouette(int cx, int cy, int w, int h, int sil_type, uint32_t body, uint32_t accent);
+/* 明亮展示卡機型剪影 */
+void ui_draw_aircraft_card_art(int cx, int cy, int w, int h, int sil_type, uint32_t tail_col);
+
 #endif
