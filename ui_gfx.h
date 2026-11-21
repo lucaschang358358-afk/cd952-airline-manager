@@ -23,4 +23,5 @@ void ui_draw_route_arc(int lat1, int lon1, int lat2, int lon2, int mx, int my, i
 /* 繪製迷你折線走勢圖 (油價 / CO2 / 股價) */
 void ui_draw_sparkline(int x, int y, int w, int h, const int *vals, int count, uint32_t line_col, uint32_t grid_col);
 
+void ui_draw_aircraft_silhouette(int cx, int cy, int w, int h, int sil_type, uint32_t body, uint32_t accent);
 #endif

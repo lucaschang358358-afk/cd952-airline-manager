@@ -118,6 +118,15 @@ if has_test_pen:
 can_touch = bool(down_types and x_expr and y_expr and test_parts)
 print(f"[gen_touch_header] headers={len(header_files)} test={test_parts} down={down_types} up={up_types} xy=({x_expr},{y_expr}) enabled={can_touch}")
 
+
+del_syms = []
+for m in re.finditer(r"\b(KEY_[A-Z0-9_]*(?:BS|BACKSPACE|DEL|DELETE|ERASE|CLR|CLEAR)[A-Z0-9_]*)\b", clean):
+    sym = m.group(1)
+    if "BACKSLASH" in sym:
+        continue
+    if sym not in del_syms:
+        del_syms.append(sym)
+
 with open(out_path, "w", encoding="utf-8") as out:
     out.write("#ifndef MUTEKI_TOUCH_ADAPT_H\n#define MUTEKI_TOUCH_ADAPT_H\n\n")
     if can_touch:
@@ -137,4 +146,8 @@ with open(out_path, "w", encoding="utf-8") as out:
         out.write("#define MUTEKI_IS_TOUCH_UP(ev) (0)\n")
         out.write("#define MUTEKI_TOUCH_X(ev) (0)\n")
         out.write("#define MUTEKI_TOUCH_Y(ev) (0)\n")
+    del_parts = ["((c) == 8)", "((c) == 127)", "((c) == 14)", "((c) == 20)", "((c) == 21)"]
+    for s in del_syms:
+        del_parts.append(f"((c) == (short)({s}))")
+    out.write(f"#define MUTEKI_IS_DEL_KEY(c) ({' || '.join(del_parts)})\n")
     out.write("\n#endif\n")

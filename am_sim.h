@@ -8,7 +8,9 @@
 #define AM_MAX_HUBS      12
 #define AM_PRICE_HIST    32
 #define AM_NUM_RIVALS    10
-#define AM_SAVE_MAGIC    0x414D3431u /* "AM41" */
+#define AM_SAVE_MAGIC    0x414D3432u /* "AM42" */
+#define AM_MAX_FLOG      12
+#define AM_NUM_ACH       16
 
 typedef struct {
     int active;
@@ -45,6 +47,15 @@ typedef struct {
     int owned_shares;
     int avg_cost;
 } RivalAirline;
+
+
+typedef struct {
+    char reg[12];
+    char route[16];     /* e.g. "TPE->HND" */
+    int pax_or_tons;
+    int is_cargo;
+    int64_t net_profit;
+} FlightLogEntry;
 
 typedef struct {
     uint32_t magic;
@@ -102,6 +113,13 @@ typedef struct {
     int own_share_hist[AM_PRICE_HIST];
     RivalAirline rivals[AM_NUM_RIVALS];
 
+    /* 銀行貸款、航班獲利日誌、16 項航空成就 */
+    int64_t loan_balance;
+    FlightLogEntry flight_log[AM_MAX_FLOG];
+    int flight_log_count;
+    uint8_t ach_unlocked[AM_NUM_ACH];
+    int bought_low_fuel;
+
     int64_t last_unix_time;
     char last_notice[96];
 } AmWorld;
@@ -114,7 +132,7 @@ int  am_sim_load(void);
 void am_sim_new_company(const char *name, const char *iata, int hub_ap_idx, int realism_mode);
 
 /* 推進模擬時間 (dt_real_sec 為真實秒數，會自動乘以倍速或處理離線掛機時間) */
-void am_sim_tick(int dt_real_sec, int apply_speed_mult);
+int  am_sim_tick(int dt_real_sec, int apply_speed_mult);
 int  am_sim_speed_mult(void);
 
 /* 核心操作 */
@@ -137,6 +155,15 @@ int  am_acheck_plane(int fleet_idx, char *out_msg, int msg_sz);
 int  am_buy_mod(int fleet_idx, int mod_type, char *out_msg, int msg_sz); /* 0=Spd, 1=Fuel, 2=CO2 */
 int  am_buy_hub(int ap_idx, char *out_msg, int msg_sz);
 int  am_trade_stock(int rival_idx, int delta_shares, char *out_msg, int msg_sz);
+
+int  am_take_loan(int64_t amount, char *out_msg, int msg_sz);
+int  am_repay_loan(int64_t amount, char *out_msg, int msg_sz);
+int  am_airline_level(void);
+const char *am_airline_rank_name(int lv);
+const char *am_ach_name(int id);
+const char *am_ach_desc(int id);
+int64_t     am_ach_reward(int id);
+int  am_ach_unlocked_count(void);
 
 const char *am_event_name(int event_id);
 const char *am_event_desc(int event_id);

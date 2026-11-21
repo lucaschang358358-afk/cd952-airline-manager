@@ -261,12 +261,13 @@ void hal_present(void) {
 
 int64_t hal_get_unix_time(void) { return (int64_t)time(NULL); }
 uint32_t hal_get_seed(void) { return (uint32_t)time(NULL) ^ 0xA4414952u; }
-const char *hal_get_save_path(void) { return "C:\\cd952_am4.sav"; }
+const char *hal_get_save_path(void) { return "C:\\cd952_am4_v2.sav"; }
 const char *hal_get_extra_airports_csv(void) { return "C:\\airports.csv"; }
 void hal_request_quit(void) { g_running = 0; }
 
 static AmKey map_key(short code, char *out_ch) {
     *out_ch = (code >= 0x20 && code < 0x7F) ? (char)code : '\0';
+    if (MUTEKI_IS_DEL_KEY(code)) { *out_ch = '\0'; return AKEY_BACKSPACE; }
     switch (code) {
         case 1:  return AKEY_BACK;
         case 2:  return AKEY_LEFT;

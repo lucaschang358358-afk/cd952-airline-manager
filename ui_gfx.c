@@ -306,3 +306,66 @@ void ui_draw_sparkline(int x, int y, int w, int h, const int *vals, int count, u
     }
     if (px >= 0) hal_fill_circle(px, py, 3, 0xFFFFFF);
 }
+
+/* 繪製精緻飛機側面輪廓剪影 (0=螺旋槳, 1=支線噴射, 2=窄體客機, 3=寬體雙發, 4=雙層四發巨無霸, 5=超音速協和, 6=重型貨機) */
+void ui_draw_aircraft_silhouette(int cx, int cy, int w, int h, int sil_type, uint32_t body, uint32_t accent) {
+    /* 藍圖背景格線 */
+    int x0 = cx - w / 2, y0 = cy - h / 2;
+    ui_fill_rrect(x0, y0, w, h, 10, 0x091526);
+    ui_draw_rrect(x0, y0, w, h, 10, 0x1E3A5F);
+    for (int gx = x0 + 18; gx < x0 + w - 8; gx += 20) hal_fill_rect(gx, y0 + 2, 1, h - 4, 0x10233B);
+    for (int gy = y0 + 14; gy < y0 + h - 6; gy += 16) hal_fill_rect(x0 + 2, gy, w - 4, 1, 0x10233B);
+
+    int fuse_l = (w * 68) / 100;
+    int fx = cx - fuse_l / 2;
+    int fy = cy + 4;
+    int fh = (sil_type == 4) ? 20 : ((sil_type == 3 || sil_type == 6) ? 16 : ((sil_type == 5) ? 9 : 12));
+
+    /* 垂直尾翼 */
+    int tx = fx + 6, tw = 22, th = (sil_type == 4) ? 28 : 22;
+    for (int dy = 0; dy < th; dy++) {
+        int s = (dy * 10) / th;
+        hal_fill_rect(tx - 6 + s, fy - dy, tw - s / 2, 1, accent);
+    }
+
+    /* 機身主體 + 圓潤機鼻 */
+    ui_fill_rrect(fx, fy - fh / 2, fuse_l, fh, fh / 2, body);
+    if (sil_type == 5) {
+        /* 協和號尖銳超音速機鼻 */
+        for (int dx = 0; dx < 26; dx++) {
+            int hh = (fh * (26 - dx)) / 26;
+            hal_fill_rect(fx + fuse_l - 6 + dx, fy - hh / 2 + 1, 1, hh > 1 ? hh : 1, body);
+        }
+    } else if (sil_type == 4) {
+        /* 雙層客艙 / 747 上層隆起 */
+        ui_fill_rrect(fx + fuse_l / 3, fy - fh / 2 - 5, (fuse_l * 55) / 100, 10, 5, body);
+    }
+
+    /* 駕駛艙黑窗與客艙窗排 */
+    hal_fill_rect(fx + fuse_l - 16, fy - fh / 2 + 2, 8, 4, 0x0F172A);
+    if (sil_type != 6) {
+        for (int wx = fx + 26; wx < fx + fuse_l - 24; wx += 7) {
+            hal_fill_rect(wx, fy - 2, 4, 3, 0x1E293B);
+            if (sil_type == 4 && wx > fx + fuse_l / 3 + 4) hal_fill_rect(wx, fy - 8, 4, 2, 0x1E293B);
+        }
+    } else {
+        /* 貨機大貨艙門標記 */
+        hal_draw_rect(fx + 28, fy - fh / 2 + 2, 26, fh - 4, accent);
+        hal_fill_rect(fx + 20, fy + 1, fuse_l - 38, 3, accent);
+    }
+
+    /* 機翼與發動機 */
+    int wx = cx - 10;
+    hal_fill_rect(wx - 12, fy + 2, 34, 5, ui_blend(body, 0x000000, 25));
+    if (sil_type == 0) {
+        /* 螺旋槳 */
+        hal_fill_rect(wx + 8, fy - 12, 2, 26, 0xCBD5E1);
+    } else if (sil_type == 1) {
+        /* 尾吊發動機 */
+        ui_fill_rrect(fx + 16, fy - 7, 14, 6, 3, 0x94A3B8);
+    } else {
+        /* 翼下渦扇發動機 */
+        ui_fill_rrect(wx - 2, fy + 5, 16, 7, 3, 0x94A3B8);
+        if (sil_type == 4) ui_fill_rrect(wx - 16, fy + 4, 13, 6, 3, 0x64748B);
+    }
+}

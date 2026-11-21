@@ -236,6 +236,106 @@ void am_sim_init(void) {
     memset(&g_am, 0, sizeof(g_am));
 }
 
+
+typedef struct { const char *name; const char *desc; int64_t reward; } AmAchDef;
+static const AmAchDef AM_ACHS[AM_NUM_ACH] = {
+    { "首航啟程",     "完成第 1 趟商業航班",            250000LL },
+    { "空中常客",     "累計完成 10 趟航班",             500000LL },
+    { "航空新星",     "累計完成 50 趟航班",            1500000LL },
+    { "區域機隊",     "機隊規模達到 3 架飛機",          600000LL },
+    { "大型機隊",     "機隊規模達到 10 架飛機",        2500000LL },
+    { "跨洲霸主",     "機隊規模達到 20 架飛機",        6000000LL },
+    { "全球樞紐",     "擁有 2 座全球樞紐機場",         1000000LL },
+    { "五大洲網",     "擁有 5 座全球樞紐機場",         3500000LL },
+    { "低價囤油王",   "油價低於 $650 時買入燃油",       400000LL },
+    { "萬人空巷",     "累計載客突破 5,000 人次",        800000LL },
+    { "百萬旅運",     "累計載客突破 50,000 人次",      3000000LL },
+    { "貨運大亨",     "累計航空貨運達 500 噸",         1200000LL },
+    { "寬體旗艦",     "購入 1 架長程寬體或巨無霸客機", 1500000LL },
+    { "超音速傳奇",   "購入協和號或超音速客機",        5000000LL },
+    { "品牌巔峰",     "航空公司有效聲譽達 90% 以上",   1000000LL },
+    { "億萬帝國",     "現金資產突破 $100,000,000",    10000000LL }
+};
+
+const char *am_ach_name(int id)   { return (id >= 0 && id < AM_NUM_ACH) ? AM_ACHS[id].name : ""; }
+const char *am_ach_desc(int id)   { return (id >= 0 && id < AM_NUM_ACH) ? AM_ACHS[id].desc : ""; }
+int64_t     am_ach_reward(int id) { return (id >= 0 && id < AM_NUM_ACH) ? AM_ACHS[id].reward : 0; }
+int am_ach_unlocked_count(void) {
+    int c = 0; for (int i = 0; i < AM_NUM_ACH; i++) if (g_am.ach_unlocked[i]) c++;
+    return c;
+}
+
+int am_airline_level(void) {
+    int pts = g_am.total_flights_done * 2 + g_am.fleet_count * 12 + g_am.hub_count * 20 + am_ach_unlocked_count() * 15;
+    int lv = 1 + pts / 35;
+    if (lv > 20) lv = 20;
+    return lv;
+}
+
+const char *am_airline_rank_name(int lv) {
+    if (lv >= 18) return "全球航空帝國霸主";
+    if (lv >= 14) return "五星洲際旗艦航空";
+    if (lv >= 10) return "跨國聯盟核心成員";
+    if (lv >= 6)  return "國際幹線航空公司";
+    if (lv >= 3)  return "區域成長型航空";
+    return "新創起飛航空公司";
+}
+
+static void check_achievements(void) {
+    int has_wide = 0, has_sst = 0;
+    for (int i = 0; i < g_am.fleet_count; i++) {
+        const AircraftModel *m = am_aircraft_get(g_am.fleet[i].model_idx);
+        if (m->silhouette == 3 || m->silhouette == 4) has_wide = 1;
+        if (m->silhouette == 5) has_sst = 1;
+    }
+    int cond[AM_NUM_ACH] = {
+        g_am.total_flights_done >= 1,
+        g_am.total_flights_done >= 10,
+        g_am.total_flights_done >= 50,
+        g_am.fleet_count >= 3,
+        g_am.fleet_count >= 10,
+        g_am.fleet_count >= 20,
+        g_am.hub_count >= 2,
+        g_am.hub_count >= 5,
+        g_am.bought_low_fuel > 0,
+        g_am.total_pax_carried >= 5000,
+        g_am.total_pax_carried >= 50000,
+        g_am.total_cargo_tons >= 500,
+        has_wide,
+        has_sst,
+        am_effective_reputation() >= 90,
+        g_am.cash >= 100000000LL
+    };
+    for (int i = 0; i < AM_NUM_ACH; i++) {
+        if (!g_am.ach_unlocked[i] && cond[i]) {
+            g_am.ach_unlocked[i] = 1;
+            g_am.cash += AM_ACHS[i].reward;
+            snprintf(g_am.last_notice, sizeof(g_am.last_notice), "解鎖成就【%s】獎金 +$%lld！",
+                     AM_ACHS[i].name, (long long)AM_ACHS[i].reward);
+        }
+    }
+}
+
+int am_take_loan(int64_t amount, char *out_msg, int msg_sz) {
+    if (g_am.loan_balance + amount > 30000000LL) {
+        snprintf(out_msg, (size_t)msg_sz, "銀行貸款上限為 $30M！"); return 0;
+    }
+    g_am.cash += amount;
+    g_am.loan_balance += (amount * 110LL) / 100LL; /* 含 10% 固定利息 */
+    snprintf(out_msg, (size_t)msg_sz, "核貸成功 +$%lld (總待還 $%lld)", (long long)amount, (long long)g_am.loan_balance);
+    am_sim_save(); return 1;
+}
+
+int am_repay_loan(int64_t amount, char *out_msg, int msg_sz) {
+    if (g_am.loan_balance <= 0) { snprintf(out_msg, (size_t)msg_sz, "目前無銀行負債！"); return 0; }
+    if (amount > g_am.loan_balance) amount = g_am.loan_balance;
+    if (g_am.cash < amount) { snprintf(out_msg, (size_t)msg_sz, "現金不足還款！"); return 0; }
+    g_am.cash -= amount;
+    g_am.loan_balance -= amount;
+    snprintf(out_msg, (size_t)msg_sz, "已償還貸款 $%lld (剩餘 $%lld)", (long long)amount, (long long)g_am.loan_balance);
+    am_sim_save(); return 1;
+}
+
 static void complete_flight(FleetPlane *fp) {
     const AircraftModel *m = am_aircraft_get(fp->model_idx);
     int rep = am_effective_reputation();
@@ -289,10 +389,21 @@ static void complete_flight(FleetPlane *fp) {
     if (fp->wear_pct > 100) fp->wear_pct = 100;
 
     if (g_am.base_reputation < 75 && rng_range(0, 99) < 25) g_am.base_reputation++;
+
+    for (int i = AM_MAX_FLOG - 1; i > 0; i--) g_am.flight_log[i] = g_am.flight_log[i - 1];
+    FlightLogEntry *fl = &g_am.flight_log[0];
+    snprintf(fl->reg, sizeof(fl->reg), "%s", fp->reg);
+    snprintf(fl->route, sizeof(fl->route), "%s->%s", am_airport_get(fp->orig_ap)->iata, am_airport_get(fp->dest_ap)->iata);
+    fl->is_cargo = m->is_cargo;
+    fl->pax_or_tons = m->is_cargo ? ((fp->seats_y * load_pct) / 100) : (((fp->seats_y + fp->seats_j + fp->seats_f) * load_pct) / 100);
+    fl->net_profit = net;
+    if (g_am.flight_log_count < AM_MAX_FLOG) g_am.flight_log_count++;
+    check_achievements();
 }
 
-void am_sim_tick(int dt_real_sec, int apply_speed_mult) {
-    if (!g_am.initialized || dt_real_sec <= 0) return;
+int am_sim_tick(int dt_real_sec, int apply_speed_mult) {
+    if (!g_am.initialized || dt_real_sec <= 0) return 0;
+    int major_event = 0;
     int sim_sec = apply_speed_mult ? (dt_real_sec * am_sim_speed_mult()) : dt_real_sec;
     if (sim_sec < 1) sim_sec = 1;
 
@@ -302,7 +413,7 @@ void am_sim_tick(int dt_real_sec, int apply_speed_mult) {
         if (!fp->active) continue;
         if (fp->status == 1) {
             fp->flight_elapsed_sec += sim_sec;
-            if (fp->flight_elapsed_sec >= fp->flight_total_sec) complete_flight(fp);
+            if (fp->flight_elapsed_sec >= fp->flight_total_sec) { complete_flight(fp); major_event = 1; }
         } else if (fp->status == 2) {
             fp->flight_elapsed_sec += sim_sec;
             if (fp->flight_elapsed_sec >= fp->flight_total_sec) {
@@ -334,7 +445,9 @@ void am_sim_tick(int dt_real_sec, int apply_speed_mult) {
     if (steps > 0) {
         g_am.market_tick_acc %= 600;
         for (int s = 0; s < steps; s++) step_stochastic_market();
+        major_event = 1;
     }
+    return major_event;
 }
 
 int am_buy_aircraft(int model_idx, int hub_ap_idx, char *out_msg, int msg_sz) {
@@ -364,6 +477,7 @@ int am_buy_aircraft(int model_idx, int hub_ap_idx, char *out_msg, int msg_sz) {
     fp->acheck_hrs_left = m->acheck_hrs;
 
     snprintf(out_msg, (size_t)msg_sz, "成功購入 %s (%s)！請至機隊頁設定航線", m->model, fp->reg);
+    check_achievements();
     am_sim_save();
     return 1;
 }
@@ -498,6 +612,8 @@ int am_buy_fuel(int64_t lbs, char *out_msg, int msg_sz) {
     int64_t cost = (lbs * (int64_t)g_am.fuel_price) / 1000LL;
     if (g_am.cash < cost) { snprintf(out_msg, (size_t)msg_sz, "資金不足！需 $%lld", (long long)cost); return 0; }
     g_am.cash -= cost; g_am.total_expenses += cost; g_am.fuel_lbs += lbs;
+    if (g_am.fuel_price <= 650) g_am.bought_low_fuel = 1;
+    check_achievements();
     snprintf(out_msg, (size_t)msg_sz, "購入 %lld lbs 燃油 (花費 $%lld)", (long long)lbs, (long long)cost);
     am_sim_save(); return 1;
 }
@@ -596,6 +712,7 @@ int am_buy_hub(int ap_idx, char *out_msg, int msg_sz) {
     g_am.cash -= cost; g_am.total_expenses += cost;
     g_am.hubs[g_am.hub_count++] = ap_idx;
     if (g_am.base_reputation < 90) g_am.base_reputation += 2;
+    check_achievements();
     snprintf(out_msg, (size_t)msg_sz, "新樞紐啟用：%s！基礎聲譽 +2%%", am_airport_get(ap_idx)->iata);
     am_sim_save(); return 1;
 }
