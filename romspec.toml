@@ -1,0 +1,11 @@
+[rom]
+title = "Airline Manager"
+short-title = "AM4"
+category = "APPLET_GAME"
+default-locale = "en"
+copyright = "CD952 Airline Manager (MIT)"
+version = "1.0.0"
+
+[metadata.en]
+title = "Airline Manager"
+short-title = "AM4"
