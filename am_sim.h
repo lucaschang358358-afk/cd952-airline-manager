@@ -10,7 +10,7 @@
 #define AM_NUM_RIVALS    10
 #define AM_MAX_FLOG      12
 #define AM_NUM_ACH       16
-#define AM_SAVE_MAGIC    0x414D3433u /* "AM43" */
+#define AM_SAVE_MAGIC    0x414D3434u /* "AM44" */
 
 typedef struct {
     int active;
@@ -30,7 +30,7 @@ typedef struct {
     int leg_dir;                   /* 0=去程 (orig->dest), 1=回程 (dest->orig) */
     int auto_return;               /* 1=抵達目的地後自動載客飛回原機場 (雙向往返!) */
 
-    int status;                    /* 0=停機待命, 1=飛行中, 2=A-Check維修中 */
+    int status;                    /* 0=停機待命, 1=飛行中, 2=A-Check維修中, 3=停飛封存(Grounded) */
     int flight_elapsed_sec;
     int flight_total_sec;
 
@@ -115,6 +115,17 @@ typedef struct {
     uint8_t ach_unlocked[AM_NUM_ACH];
     int bought_low_fuel;
 
+    int catering_level;   /* 0=無, 1=標準餐飲(+6%營收+3%聲譽), 2=五星主廚(+14%營收+7%聲譽) */
+    int alliance_id;      /* 0=無, 1=星空聯盟, 2=天合聯盟, 3=寰宇一家 (+6%聲譽) */
+
+    /* VIP 特別包機合約 */
+    int charter_orig;
+    int charter_dest;
+    int charter_type;     /* 0..3 */
+    int64_t charter_reward;
+    int charter_pts;
+    int charter_done_cnt;
+
     int64_t last_unix_time;
     char last_notice[96];
 } AmWorld;
@@ -157,6 +168,19 @@ int  am_trade_stock(int rival_idx, int delta_shares, char *out_msg, int msg_sz);
 int  am_take_loan(int64_t amount, char *out_msg, int msg_sz);
 int  am_repay_loan(int64_t amount, char *out_msg, int msg_sz);
 int  am_spend_points(int type, char *out_msg, int msg_sz); /* 0=換$2M, 1=油槽+2M, 2=聲譽+5% */
+
+int64_t am_estimate_leg_profit(int model_idx, int dist_km, int sy, int sj, int sf,
+                               int py, int pj, int pf, int cost_index, int mod_fuel,
+                               int64_t *out_rev, int64_t *out_fuel_cost);
+int  am_ground_plane(int fleet_idx, char *out_msg, int msg_sz);
+int  am_repair_all(char *out_msg, int msg_sz);
+int  am_acheck_all(char *out_msg, int msg_sz);
+int  am_set_catering(int level, char *out_msg, int msg_sz);
+int  am_join_alliance(int alliance_id, char *out_msg, int msg_sz);
+void am_roll_new_charter(void);
+int  am_run_charter_with_plane(int fleet_idx, char *out_msg, int msg_sz);
+const char *am_alliance_name(int id);
+const char *am_charter_title(int type);
 
 int         am_airline_level(void);
 const char *am_airline_rank_name(int lv);

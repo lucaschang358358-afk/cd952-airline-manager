@@ -1,3 +1,4 @@
+#include "am_map_rom.h"
 #include "ui_gfx.h"
 #include <stdlib.h>
 #include <string.h>
@@ -354,5 +355,117 @@ void ui_draw_aircraft_card_art(int cx, int cy, int w, int h, int sil_type, uint3
     else {
         ui_fill_rrect(wx - 2, fy + 5, 16, 7, 3, 0x64748B);
         if (sil_type == 4) ui_fill_rrect(wx - 16, fy + 4, 13, 6, 3, 0x475569);
+    }
+}
+
+/* 高精細日間地形圖 ROM 渲染 (支援 1x / 2x / 3x 縮放與平移，ARM9 毫秒級繪製!) */
+void ui_draw_world_map_hd(int mx, int my, int mw, int mh, int zoom, int pan_x, int pan_y) {
+    if (zoom < 1) zoom = 1;
+    if (zoom > 3) zoom = 3;
+    int src_w = AM_MAP_ROM_W / zoom;
+    int src_h = AM_MAP_ROM_H / zoom;
+    int sx0 = pan_x;
+    int sy0 = pan_y;
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx0 + src_w > AM_MAP_ROM_W) sx0 = AM_MAP_ROM_W - src_w;
+    if (sy0 + src_h > AM_MAP_ROM_H) sy0 = AM_MAP_ROM_H - src_h;
+
+    for (int dy = 0; dy < mh; dy++) {
+        int sy = sy0 + (dy * src_h) / mh;
+        if (sy >= AM_MAP_ROM_H) sy = AM_MAP_ROM_H - 1;
+        const uint8_t *srow = AM_MAP_PIXELS + sy * AM_MAP_ROM_W;
+        int py = my + dy;
+        int run_x = mx;
+        uint32_t run_col = AM_MAP_PALETTE[srow[sx0]];
+        for (int dx = 1; dx < mw; dx++) {
+            int sx = sx0 + (dx * src_w) / mw;
+            if (sx >= AM_MAP_ROM_W) sx = AM_MAP_ROM_W - 1;
+            uint32_t col = AM_MAP_PALETTE[srow[sx]];
+            if (col != run_col) {
+                hal_fill_rect(run_x, py, (mx + dx) - run_x, 1, run_col);
+                run_x = mx + dx;
+                run_col = col;
+            }
+        }
+        hal_fill_rect(run_x, py, (mx + mw) - run_x, 1, run_col);
+    }
+
+    /* 柔和經緯度輔助線 (只在 1x/2x 顯示淡線) */
+    for (int lon = -1500; lon <= 1500; lon += 300) {
+        int x, y;
+        if (ui_latlon_to_xy_view(0, lon, mx, my, mw, mh, zoom, pan_x, pan_y, &x, &y))
+            hal_fill_rect(x, my, 1, mh, 0x8CC8DC);
+    }
+    for (int lat = -300; lat <= 600; lat += 300) {
+        int x, y;
+        if (ui_latlon_to_xy_view(lat, 0, mx, my, mw, mh, zoom, pan_x, pan_y, &x, &y))
+            hal_fill_rect(mx, y, mw, 1, (lat == 0) ? 0x7AB8CE : 0x8CC8DC);
+    }
+}
+
+int ui_latlon_to_xy_view(int lat10, int lon10, int mx, int my, int mw, int mh,
+                         int zoom, int pan_x, int pan_y, int *ox, int *oy) {
+    if (zoom < 1) zoom = 1;
+    if (zoom > 3) zoom = 3;
+    int src_w = AM_MAP_ROM_W / zoom;
+    int src_h = AM_MAP_ROM_H / zoom;
+    int sx0 = pan_x, sy0 = pan_y;
+    if (sx0 < 0) sx0 = 0;
+    if (sy0 < 0) sy0 = 0;
+    if (sx0 + src_w > AM_MAP_ROM_W) sx0 = AM_MAP_ROM_W - src_w;
+    if (sy0 + src_h > AM_MAP_ROM_H) sy0 = AM_MAP_ROM_H - src_h;
+
+    int rx = ((lon10 + 1800) * AM_MAP_ROM_W) / 3600;
+    int ry = ((820 - lat10) * AM_MAP_ROM_H) / 1420;
+    int x = mx + ((rx - sx0) * mw) / src_w;
+    int y = my + ((ry - sy0) * mh) / src_h;
+    *ox = x; *oy = y;
+    return (x >= mx && x < mx + mw && y >= my && y < my + mh);
+}
+
+void ui_draw_route_arc_view(int lat1, int lon1, int lat2, int lon2, int mx, int my, int mw, int mh,
+                            int zoom, int pan_x, int pan_y, int progress_pct, int is_return_leg,
+                            uint32_t arc_col, uint32_t plane_col) {
+    if (is_return_leg) {
+        int t = lat1; lat1 = lat2; lat2 = t;
+        t = lon1; lon1 = lon2; lon2 = t;
+    }
+    int x0, y0, x1, y1;
+    ui_latlon_to_xy_view(lat1, lon1, mx, my, mw, mh, zoom, pan_x, pan_y, &x0, &y0);
+    ui_latlon_to_xy_view(lat2, lon2, mx, my, mw, mh, zoom, pan_x, pan_y, &x1, &y1);
+
+    int dx = x1 - x0, lift = abs(dx) / 5;
+    if (lift > 46) lift = 46;
+    int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2 - lift;
+    if (cy < my + 4) cy = my + 4;
+
+    int prev_x = x0, prev_y = y0;
+    const int STEPS = 14;
+    for (int i = 1; i <= STEPS; i++) {
+        int t = (i * 100) / STEPS, it = 100 - t;
+        int bx = (it * it * x0 + 2 * it * t * cx + t * t * x1) / 10000;
+        int by = (it * it * y0 + 2 * it * t * cy + t * t * y1) / 10000;
+        if ((prev_x >= mx && prev_x < mx + mw && prev_y >= my && prev_y < my + mh) ||
+            (bx >= mx && bx < mx + mw && by >= my && by < my + mh)) {
+            int cx0 = prev_x < mx ? mx : (prev_x >= mx + mw ? mx + mw - 1 : prev_x);
+            int cy0 = prev_y < my ? my : (prev_y >= my + mh ? my + mh - 1 : prev_y);
+            int cx1 = bx < mx ? mx : (bx >= mx + mw ? mx + mw - 1 : bx);
+            int cy1 = by < my ? my : (by >= my + mh ? my + mh - 1 : by);
+            hal_draw_line(cx0, cy0, cx1, cy1, arc_col);
+            if (cy0 + 1 < my + mh && cy1 + 1 < my + mh) hal_draw_line(cx0, cy0 + 1, cx1, cy1 + 1, arc_col);
+        }
+        prev_x = bx; prev_y = by;
+    }
+
+    if (progress_pct >= 0 && progress_pct <= 100) {
+        int t = progress_pct, it = 100 - t;
+        int px = (it * it * x0 + 2 * it * t * cx + t * t * x1) / 10000;
+        int py = (it * it * y0 + 2 * it * t * cy + t * t * y1) / 10000;
+        if (px >= mx + 5 && px < mx + mw - 5 && py >= my + 5 && py < my + mh - 5) {
+            hal_fill_circle(px, py, 5, 0x1E293B);
+            hal_fill_circle(px, py, 4, plane_col);
+            hal_fill_circle(px, py, 2, 0xFFFFFF);
+        }
     }
 }

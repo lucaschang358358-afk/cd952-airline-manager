@@ -78,6 +78,8 @@ static int g_fleet_sel = 0, g_fleet_scroll = 0;
 static int g_shop_mfg  = 0, g_shop_sel = 0, g_shop_scroll = 0, g_shop_detail_model = 0;
 static int g_cfg_y = 120, g_cfg_j = 18, g_cfg_f = 4; /* 買機或改艙時自訂 Y/J/F 座位 */
 static int g_ops_hub_ap = 42;
+static int g_hubs_subtab = 0;
+static int g_map_zoom = 1, g_map_pan_x = 0, g_map_pan_y = 0;
 static int g_fin_subtab = 0; /* 0=財報/貸款/自訂資金, 1=雙向航班紀錄, 2=10家AI股市 */
 static int g_stock_sel = 0, g_stock_scroll = 0;
 static int g_ach_scroll = 0;
@@ -349,8 +351,8 @@ void am_ui_on_key(AmKey key, char raw_char) {
 
     if (g_scr == SCR_PLANE_MODAL) {
         if (key == AKEY_BACK) { g_scr = SCR_MAIN; return; }
-        if (key == AKEY_UP) g_pl_sel = (g_pl_sel + 6) % 7;
-        else if (key == AKEY_DOWN) g_pl_sel = (g_pl_sel + 1) % 7;
+        if (key == AKEY_UP) g_pl_sel = (g_pl_sel + 7) % 8;
+        else if (key == AKEY_DOWN) g_pl_sel = (g_pl_sel + 1) % 8;
         else if (is_ok) {
             char msg[96];
             if (g_pl_sel == 0) { am_repair_plane(g_pl_fleet_idx, msg, sizeof(msg)); set_toast(msg); }
@@ -363,6 +365,8 @@ void am_ui_on_key(AmKey key, char raw_char) {
                 set_toast(g_am.fleet[g_pl_fleet_idx].auto_return ? "已開啟雙向自動往返！" : "已改為單段手動起飛");
                 am_sim_save();
             } else if (g_pl_sel == 6) {
+                am_ground_plane(g_pl_fleet_idx, msg, sizeof(msg)); set_toast(msg);
+            } else if (g_pl_sel == 7) {
                 if (am_sell_aircraft(g_pl_fleet_idx, msg, sizeof(msg))) { set_toast(msg); g_scr = SCR_MAIN; }
                 else set_toast(msg);
             }
@@ -581,8 +585,8 @@ void am_ui_on_touch(int tx, int ty) {
             fp->seats_y = g_cfg_y; fp->seats_j = g_cfg_j; fp->seats_f = g_cfg_f;
             am_sim_save(); return;
         }
-        int idx = (ty - (my + 112)) / 42;
-        if (idx >= 0 && idx < 7) { g_pl_sel = idx; am_ui_on_key(AKEY_OK, 0); }
+        int idx = (ty - (my + 104)) / 38;
+        if (idx >= 0 && idx < 8) { g_pl_sel = idx; am_ui_on_key(AKEY_OK, 0); }
         return;
     }
 
@@ -610,6 +614,32 @@ void am_ui_on_touch(int tx, int ty) {
     }
 
     int mx = 14, mw = sw - 96;
+    if (g_tab == TAB_MAP && ty >= 40 && ty < sh - 62) {
+        int map_w = sw - 82, map_h = sh - 102;
+        if (tx >= map_w - 40 && tx <= map_w - 6 && ty >= 52 && ty <= 122) {
+            if (ty < 86 && g_map_zoom < 3) {
+                g_map_zoom++;
+                g_map_pan_x = (360 - 360 / g_map_zoom) / 2;
+                g_map_pan_y = (190 - 190 / g_map_zoom) / 2;
+            } else if (ty >= 86 && g_map_zoom > 1) {
+                g_map_zoom--;
+                if (g_map_zoom == 1) { g_map_pan_x = 0; g_map_pan_y = 0; }
+            }
+            return;
+        }
+        if (g_map_zoom > 1) {
+            int src_w = 360 / g_map_zoom, src_h = 190 / g_map_zoom;
+            int click_rx = g_map_pan_x + (tx * src_w) / map_w;
+            int click_ry = g_map_pan_y + ((ty - 40) * src_h) / map_h;
+            g_map_pan_x = click_rx - src_w / 2;
+            g_map_pan_y = click_ry - src_h / 2;
+            if (g_map_pan_x < 0) g_map_pan_x = 0;
+            if (g_map_pan_y < 0) g_map_pan_y = 0;
+            if (g_map_pan_x + src_w > 360) g_map_pan_x = 360 - src_w;
+            if (g_map_pan_y + src_h > 190) g_map_pan_y = 190 - src_h;
+        }
+        return;
+    }
     if (g_tab == TAB_FLEET) {
         int top_y = 54, row_h = 88;
         if (ty >= top_y && ty < sh - 38) {
@@ -620,9 +650,12 @@ void am_ui_on_touch(int tx, int ty) {
                 else if (tx >= mx + mw - 144) open_route_modal(idx);
                 else if (tx >= mx + mw - 216) { char m[96]; am_depart_plane(idx, m, sizeof(m)); set_toast(m); }
             }
-        } else if (ty >= sh - 38) {
-            if (tx < mx + 140 && g_fleet_scroll > 0) g_fleet_scroll--;
-            else if (tx >= mx + mw - 140 && g_fleet_scroll + 4 < g_am.fleet_count) g_fleet_scroll++;
+        } else if (ty >= sh - 44) {
+            char m[96];
+            if (tx < mx + 110 && g_fleet_scroll > 0) g_fleet_scroll--;
+            else if (tx >= mx + 118 && tx < mx + 248) { am_repair_all(m, sizeof(m)); set_toast(m); }
+            else if (tx >= mx + 256 && tx < mx + 386) { am_acheck_all(m, sizeof(m)); set_toast(m); }
+            else if (tx >= mx + mw - 110 && g_fleet_scroll + 4 < g_am.fleet_count) g_fleet_scroll++;
         }
         return;
     }
@@ -662,14 +695,32 @@ void am_ui_on_touch(int tx, int ty) {
 
     if (g_tab == TAB_HUBS) {
         char m[96];
-        if (ty >= 92 && ty <= 136) {
-            if (tx >= mx + 260 && tx < mx + 360 && g_am.staff_salary_pct > 80) g_am.staff_salary_pct -= 5;
-            else if (tx >= mx + 370 && tx < mx + 470 && g_am.staff_salary_pct < 140) g_am.staff_salary_pct += 5;
+        if (ty >= 48 && ty <= 82) {
+            if (tx < mx + 210) g_hubs_subtab = 0;
+            else if (tx < mx + 420) g_hubs_subtab = 1;
             return;
         }
-        if (ty >= 330 && ty <= 386) {
-            if (tx < mx + 300) open_airport_picker(PICK_FOR_BUY_HUB, SCR_MAIN);
-            else { am_buy_hub(g_ops_hub_ap, m, sizeof(m)); set_toast(m); }
+        if (g_hubs_subtab == 0) {
+            if (ty >= 122 && ty <= 164) {
+                if (tx >= mx + 260 && tx < mx + 360 && g_am.staff_salary_pct > 80) g_am.staff_salary_pct -= 5;
+                else if (tx >= mx + 370 && tx < mx + 470 && g_am.staff_salary_pct < 140) g_am.staff_salary_pct += 5;
+                return;
+            }
+            if (ty >= 344 && ty <= 394) {
+                if (tx < mx + 300) open_airport_picker(PICK_FOR_BUY_HUB, SCR_MAIN);
+                else { am_buy_hub(g_ops_hub_ap, m, sizeof(m)); set_toast(m); }
+            }
+        } else {
+            int bw = (mw - 20) / 3;
+            if (ty >= 124 && ty <= 204) {
+                int lv = (tx - mx) / (bw + 10);
+                if (lv >= 0 && lv < 3) { am_set_catering(lv, m, sizeof(m)); set_toast(m); }
+                return;
+            }
+            if (ty >= 256 && ty <= 344) {
+                int al = (tx - mx) / (bw + 10) + 1;
+                if (al >= 1 && al <= 3) { am_join_alliance(al, m, sizeof(m)); set_toast(m); }
+            }
         }
         return;
     }
@@ -701,10 +752,22 @@ void am_ui_on_touch(int tx, int ty) {
 
     if (g_tab == TAB_BONUS) {
         char m[96];
-        if (ty >= 54 && ty <= 116) {
+        if (ty >= 50 && ty <= 104) {
             int bw = (mw - 20) / 3, c = (tx - mx) / (bw + 10);
             if (c >= 0 && c < 3) { am_spend_points(c, m, sizeof(m)); set_toast(m); }
-        } else if (ty >= sh - 38) {
+            return;
+        }
+        if (ty >= 114 && ty <= 186) {
+            if (tx >= mx + mw - 102) { am_roll_new_charter(); set_toast("已刷新新的 VIP 包機合約！"); }
+            else if (tx >= mx + mw - 236) {
+                int ready_idx = -1;
+                for (int i = 0; i < g_am.fleet_count; i++) if (g_am.fleet[i].status == 0) { ready_idx = i; break; }
+                am_run_charter_with_plane(ready_idx, m, sizeof(m));
+                set_toast(m);
+            }
+            return;
+        }
+        if (ty >= sh - 38) {
             if (tx < mx + 180 && g_ach_scroll > 0) g_ach_scroll--;
             else if (tx > mx + mw - 180 && g_ach_scroll < 4) g_ach_scroll++;
         }
@@ -751,7 +814,7 @@ static void render_right_dock(int sw) {
 
 static void render_tab_map(int sw, int sh) {
     int mw = sw - 82, mh = sh - 102;
-    ui_draw_world_map_daylight(0, 40, mw, mh);
+    ui_draw_world_map_hd(0, 40, mw, mh, g_map_zoom, g_map_pan_x, g_map_pan_y);
     (void)am_asset_terrain_sample(10, 10);
 
     int flying = 0, ready = 0;
@@ -761,16 +824,23 @@ static void render_tab_map(int sw, int sh) {
         if (fp->has_route && fp->orig_ap >= 0 && fp->dest_ap >= 0) {
             const AirportInfo *ao = am_airport_get(fp->orig_ap), *ad = am_airport_get(fp->dest_ap);
             int pct = (fp->status == 1 && fp->flight_total_sec > 0) ? ((fp->flight_elapsed_sec * 100) / fp->flight_total_sec) : -1;
-            ui_draw_route_arc(ao->lat10, ao->lon10, ad->lat10, ad->lon10, 0, 40, mw, mh,
-                              pct, fp->leg_dir, (fp->leg_dir == 0) ? 0xDC2626 : 0x2563EB, COL_GREEN);
+            ui_draw_route_arc_view(ao->lat10, ao->lon10, ad->lat10, ad->lon10, 0, 40, mw, mh,
+                                   g_map_zoom, g_map_pan_x, g_map_pan_y, pct, fp->leg_dir,
+                                   (fp->leg_dir == 0) ? 0xDC2626 : 0x2563EB, COL_GREEN);
         }
     }
     for (int h = 0; h < g_am.hub_count; h++) {
         const AirportInfo *ap = am_airport_get(g_am.hubs[h]);
-        int hx, hy; ui_latlon_to_xy(ap->lat10, ap->lon10, 0, 40, mw, mh, &hx, &hy);
-        hal_fill_circle(hx, hy, 5, 0xDC2626); hal_fill_circle(hx, hy, 2, COL_WHITE);
-        ui_draw_badge(hx + 6, hy - 8, ap->iata, COL_TOPBAR, COL_WHITE);
+        int hx, hy;
+        if (ui_latlon_to_xy_view(ap->lat10, ap->lon10, 0, 40, mw, mh, g_map_zoom, g_map_pan_x, g_map_pan_y, &hx, &hy)) {
+            hal_fill_circle(hx, hy, 5, 0xDC2626); hal_fill_circle(hx, hy, 2, COL_WHITE);
+            if (hx + 34 < mw) ui_draw_badge(hx + 6, hy - 8, ap->iata, COL_TOPBAR, COL_WHITE);
+        }
     }
+    ui_card(mw - 38, 52, 30, 30, 6, COL_TOPBAR, COL_WHITE, 0x64748B, 0, 0);
+    ui_draw_ascii(mw - 28, 60, "+", 2, COL_WHITE);
+    ui_card(mw - 38, 86, 30, 30, 6, COL_TOPBAR, COL_WHITE, 0x64748B, 0, 0);
+    ui_draw_ascii(mw - 28, 94, "-", 2, COL_WHITE);
 
     int by = 40 + mh + 4;
     ui_card(10, by, mw - 16, 52, 10, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0);
@@ -803,7 +873,7 @@ static void render_tab_fleet(int mx, int mw, int sh) {
         } else snprintf(t1, sizeof(t1), "%s  %s  [尚未設定雙向航線]", fp->reg, m->model);
         ui_draw_str(mx + 14, ry + 10, t1, mw - 236, COL_TEXT);
 
-        const char *st = (fp->status == 1) ? "飛行中" : ((fp->status == 2) ? "A-Check中" : "停機待命");
+        const char *st = (fp->status == 1) ? "飛行中" : ((fp->status == 2) ? "A-Check中" : ((fp->status == 3) ? "停飛封存" : "停機待命"));
         snprintf(t2, sizeof(t2), "%s · Y%d/J%d/F%d · 磨損:%d%% · A檢:%dh · %s",
                  st, fp->seats_y, fp->seats_j, fp->seats_f, fp->wear_pct, fp->acheck_hrs_left,
                  fp->auto_return ? "自動往返" : "手動單段");
@@ -816,8 +886,12 @@ static void render_tab_fleet(int mx, int mw, int sh) {
         ui_fill_rrect(mx + mw - 144, ry + 20, 64, 36, 8, COL_BLUE); hal_set_text_bg(COL_BLUE); ui_draw_str(mx + mw - 130, ry + 29, "航線", 44, COL_WHITE);
         ui_fill_rrect(mx + mw - 72,  ry + 20, 62, 36, 8, 0x475569); hal_set_text_bg(0x475569); ui_draw_str(mx + mw - 58,  ry + 29, "機體", 44, COL_WHITE);
     }
-    hal_set_text_bg(COL_BG_LIGHT);
-    ui_draw_str(mx, sh - 28, g_toast[0] ? g_toast : "點按鈕起飛 / 設定雙向航線與票價 / 改裝機體與座位", mw, g_toast[0] ? COL_BLUE : COL_MUTED);
+    ui_fill_rrect(mx, sh - 40, 106, 30, 7, COL_WHITE); ui_draw_rrect(mx, sh - 40, 106, 30, 7, COL_BORDER);
+    hal_set_text_bg(COL_WHITE); ui_draw_str(mx + 20, sh - 34, "< 上一頁", 76, COL_TEXT);
+    ui_fill_rrect(mx + 118, sh - 40, 126, 30, 7, COL_AMBER); hal_set_text_bg(COL_AMBER); ui_draw_str(mx + 134, sh - 34, "一鍵全機修復", 96, COL_WHITE);
+    ui_fill_rrect(mx + 256, sh - 40, 126, 30, 7, COL_BLUE);  hal_set_text_bg(COL_BLUE);  ui_draw_str(mx + 272, sh - 34, "一鍵全機大檢", 96, COL_WHITE);
+    ui_fill_rrect(mx + mw - 106, sh - 40, 106, 30, 7, COL_WHITE); ui_draw_rrect(mx + mw - 106, sh - 40, 106, 30, 7, COL_BORDER);
+    hal_set_text_bg(COL_WHITE); ui_draw_str(mx + mw - 86, sh - 34, "下一頁 >", 76, COL_TEXT);
 }
 
 static void render_tab_shop(int mx, int mw, int sh) {
@@ -899,34 +973,65 @@ static void render_tab_fuel(int mx, int mw, int sh) {
 }
 
 static void render_tab_hubs(int mx, int mw, int sh) {
-    ui_card(mx, 54, mw, 96, 12, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
-    char st[96]; snprintf(st, sizeof(st), "員工薪資：%d%% · 團隊士氣：%d%% · 有效聲譽：%d%%", g_am.staff_salary_pct, g_am.staff_morale, am_effective_reputation());
-    ui_draw_str(mx + 16, 66, st, mw - 32, COL_TEXT);
-    ui_draw_str(mx + 16, 102, "調整薪資水準：", 180, COL_MUTED);
-    ui_fill_rrect(mx + 260, 96, 96, 36, 8, COL_PANEL_SUB); ui_draw_rrect(mx + 260, 96, 96, 36, 8, COL_BORDER);
-    hal_set_text_bg(COL_PANEL_SUB); ui_draw_str(mx + 286, 105, "-5%", 50, COL_TEXT);
-    ui_fill_rrect(mx + 370, 96, 96, 36, 8, COL_BLUE); hal_set_text_bg(COL_BLUE); ui_draw_str(mx + 394, 105, "+5%", 50, COL_WHITE);
+    const char *stabs[2] = { "員工薪資 & 全球樞紐", "機上餐飲 & 航空聯盟" };
+    for (int i = 0; i < 2; i++) {
+        int tx = mx + i * 204; uint32_t bg = (g_hubs_subtab == i) ? COL_BLUE : COL_WHITE;
+        ui_fill_rrect(tx, 50, 196, 30, 8, bg); if (g_hubs_subtab != i) ui_draw_rrect(tx, 50, 196, 30, 8, COL_BORDER);
+        hal_set_text_bg(bg); ui_draw_str(tx + 20, 56, stabs[i], 164, (g_hubs_subtab == i) ? COL_WHITE : COL_TEXT);
+    }
+    if (g_hubs_subtab == 0) {
+        ui_card(mx, 90, mw, 86, 12, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
+        char st[96]; snprintf(st, sizeof(st), "員工薪資：%d%% · 團隊士氣：%d%% · 有效聲譽：%d%%", g_am.staff_salary_pct, g_am.staff_morale, am_effective_reputation());
+        ui_draw_str(mx + 16, 102, st, mw - 32, COL_TEXT);
+        ui_draw_str(mx + 16, 134, "調整薪資水準：", 180, COL_MUTED);
+        ui_fill_rrect(mx + 260, 126, 96, 34, 8, COL_PANEL_SUB); ui_draw_rrect(mx + 260, 126, 96, 34, 8, COL_BORDER);
+        hal_set_text_bg(COL_PANEL_SUB); ui_draw_str(mx + 286, 134, "-5%", 50, COL_TEXT);
+        ui_fill_rrect(mx + 370, 126, 96, 34, 8, COL_BLUE); hal_set_text_bg(COL_BLUE); ui_draw_str(mx + 394, 134, "+5%", 50, COL_WHITE);
 
-    ui_card(mx, 166, mw, 96, 12, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
-    char hhdr[64]; snprintf(hhdr, sizeof(hhdr), "已擁有全球樞紐機場 (%d / %d)：", g_am.hub_count, AM_MAX_HUBS);
-    ui_draw_str(mx + 16, 178, hhdr, mw - 32, COL_AMBER);
-    char hlist[180] = {0};
-    for (int i = 0; i < g_am.hub_count; i++) { char seg[16]; snprintf(seg, sizeof(seg), "%s ", am_airport_get(g_am.hubs[i])->iata); strncat(hlist, seg, sizeof(hlist) - strlen(hlist) - 1); }
-    ui_draw_str(mx + 16, 212, hlist, mw - 32, COL_BLUE);
+        ui_card(mx, 188, mw, 90, 12, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
+        char hhdr[64]; snprintf(hhdr, sizeof(hhdr), "已擁有全球樞紐機場 (%d / %d)：", g_am.hub_count, AM_MAX_HUBS);
+        ui_draw_str(mx + 16, 200, hhdr, mw - 32, COL_AMBER);
+        char hlist[180] = {0};
+        for (int i = 0; i < g_am.hub_count; i++) { char seg[16]; snprintf(seg, sizeof(seg), "%s ", am_airport_get(g_am.hubs[i])->iata); strncat(hlist, seg, sizeof(hlist) - strlen(hlist) - 1); }
+        ui_draw_str(mx + 16, 232, hlist, mw - 32, COL_BLUE);
 
-    const AirportInfo *ap = am_airport_get(g_ops_hub_ap);
-    int64_t hcost = 3500000LL + (int64_t)g_am.hub_count * 1500000LL;
-    char cs[24], apinfo[128]; fmt_money(hcost, cs, sizeof(cs));
-    ui_card(mx, 278, mw, 134, 12, COL_WHITE, COL_BLUE, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
-    snprintf(apinfo, sizeof(apinfo), "目標樞紐：[%s] %s - %s · 跑道 %uft · 市場 %u%%",
-             am_country_name_zh(ap->country), ap->iata, ap->name, (unsigned)ap->runway_ft, (unsigned)ap->market_pct);
-    ui_draw_str(mx + 16, 294, apinfo, mw - 32, COL_TEXT);
-    ui_fill_rrect(mx + 16, 336, 260, 44, 9, COL_BLUE); hal_set_text_bg(COL_BLUE); ui_draw_str(mx + 38, 349, "依國家 / 城市挑選機場 >", 220, COL_WHITE);
-    ui_fill_rrect(mx + mw - 230, 336, 214, 44, 9, COL_GREEN); hal_set_text_bg(COL_GREEN);
-    char bbtn[48]; snprintf(bbtn, sizeof(bbtn), "購置此樞紐 (%s)", cs); ui_draw_str(mx + mw - 216, 349, bbtn, 190, COL_WHITE);
-
+        const AirportInfo *ap = am_airport_get(g_ops_hub_ap);
+        int64_t hcost = 3500000LL + (int64_t)g_am.hub_count * 1500000LL;
+        char cs[24], apinfo[128]; fmt_money(hcost, cs, sizeof(cs));
+        ui_card(mx, 290, mw, 132, 12, COL_WHITE, COL_BLUE, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
+        snprintf(apinfo, sizeof(apinfo), "目標樞紐：[%s] %s - %s · 跑道 %uft · 市場 %u%%",
+                 am_country_name_zh(ap->country), ap->iata, ap->name, (unsigned)ap->runway_ft, (unsigned)ap->market_pct);
+        ui_draw_str(mx + 16, 306, apinfo, mw - 32, COL_TEXT);
+        ui_fill_rrect(mx + 16, 348, 260, 44, 9, COL_BLUE); hal_set_text_bg(COL_BLUE); ui_draw_str(mx + 38, 361, "依國家 / 城市挑選機場 >", 220, COL_WHITE);
+        ui_fill_rrect(mx + mw - 230, 348, 214, 44, 9, COL_GREEN); hal_set_text_bg(COL_GREEN);
+        char bbtn[48]; snprintf(bbtn, sizeof(bbtn), "購置此樞紐 (%s)", cs); ui_draw_str(mx + mw - 216, 361, bbtn, 190, COL_WHITE);
+    } else {
+        int bw = (mw - 20) / 3;
+        hal_set_text_bg(COL_BG_LIGHT); ui_draw_str(mx, 96, "1. 機上餐飲與客艙服務 (永久提升全航線營收與聲譽)：", mw, COL_TEXT);
+        const char *cnm[3] = { "無免費餐飲 (免費)", "經濟輕食 (+6%營收)", "五星主廚 (+14%營收)" };
+        const char *cds[3] = { "標準廉航模式", "升級費 $450K · 聲譽+3%", "升級費 $1.5M · 聲譽+7%" };
+        for (int i = 0; i < 3; i++) {
+            int bx = mx + i * (bw + 10), act = (g_am.catering_level == i);
+            ui_card(bx, 126, bw, 76, 12, act ? 0xEFF6FF : COL_WHITE, act ? COL_GREEN : COL_BORDER, COL_SHADOW, act, COL_GREEN);
+            hal_set_text_bg(act ? 0xEFF6FF : COL_WHITE);
+            ui_draw_str(bx + 12, 140, cnm[i], bw - 24, act ? COL_GREEN : COL_TEXT);
+            ui_draw_str(bx + 12, 168, cds[i], bw - 24, COL_MUTED);
+        }
+        hal_set_text_bg(COL_BG_LIGHT);
+        char ahdr[112]; snprintf(ahdr, sizeof(ahdr), "2. 全球航空聯盟 (目前：%s · 入會 $1M · 聲譽+6%%)：", am_alliance_name(g_am.alliance_id));
+        ui_draw_str(mx, 226, ahdr, mw, COL_TEXT);
+        const char *anm[3] = { "Star Alliance", "SkyTeam", "oneworld" };
+        const char *azh[3] = { "星空聯盟 (全球最大)", "天合聯盟 (歐亞樞紐)", "寰宇一家 (澳英美幹線)" };
+        for (int i = 0; i < 3; i++) {
+            int bx = mx + i * (bw + 10), act = (g_am.alliance_id == i + 1);
+            ui_card(bx, 258, bw, 84, 12, act ? 0xEFF6FF : COL_WHITE, act ? COL_BLUE : COL_BORDER, COL_SHADOW, act, COL_BLUE);
+            hal_set_text_bg(act ? 0xEFF6FF : COL_WHITE);
+            ui_draw_str(bx + 14, 274, anm[i], bw - 28, act ? COL_BLUE : COL_TEXT);
+            ui_draw_str(bx + 14, 304, azh[i], bw - 28, COL_MUTED);
+        }
+    }
     hal_set_text_bg(COL_BG_LIGHT);
-    ui_draw_str(mx, sh - 28, g_toast[0] ? g_toast : "支援放入 C:\\airports.csv 解鎖全球 4,200 座機場！", mw, COL_MUTED);
+    ui_draw_str(mx, sh - 28, g_toast[0] ? g_toast : "點上方頁籤切換 樞紐管理 / 機上餐飲與航空聯盟！", mw, COL_BLUE);
 }
 
 static void render_tab_finance(int mx, int mw, int sh) {
@@ -987,37 +1092,41 @@ static void render_tab_finance(int mx, int mw, int sh) {
 }
 
 static void render_tab_bonus(int mx, int mw, int sh) {
-    /* 頂部 3 張 PAX Points 積分兌換卡 */
     int bw = (mw - 20) / 3;
     const char *pnm[3] = { "50 PTS -> 兌換 $2.5M", "40 PTS -> 油槽+2M&送油", "60 PTS -> 永久聲譽+5%" };
     for (int i = 0; i < 3; i++) {
         int bx = mx + i * (bw + 10);
-        ui_card(bx, 54, bw, 60, 10, COL_WHITE, COL_AMBER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
-        ui_draw_str(bx + 12, 74, pnm[i], bw - 24, COL_AMBER);
+        ui_card(bx, 50, bw, 52, 10, COL_WHITE, COL_AMBER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
+        ui_draw_str(bx + 12, 66, pnm[i], bw - 24, COL_AMBER);
     }
-
-    int lv = am_airline_level();
-    ui_card(mx, 126, mw, 48, 10, COL_WHITE, COL_BORDER, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
-    char lvinfo[128]; snprintf(lvinfo, sizeof(lvinfo), "航空等級：Lv.%d %s  ·  成就進度 %d / %d (解鎖贈獎金+25 PTS)", lv, am_airline_rank_name(lv), am_ach_unlocked_count(), AM_NUM_ACH);
-    ui_draw_str(mx + 14, 140, lvinfo, mw - 28, COL_TEXT);
+    ui_card(mx, 114, mw, 72, 12, COL_WHITE, COL_BLUE, COL_SHADOW, 0, 0); hal_set_text_bg(COL_WHITE);
+    const AirportInfo *co = am_airport_get(g_am.charter_orig), *cd = am_airport_get(g_am.charter_dest);
+    int cdist = am_calc_distance_km(g_am.charter_orig, g_am.charter_dest);
+    char crw[24], ct1[112], ct2[112]; fmt_money(g_am.charter_reward, crw, sizeof(crw));
+    snprintf(ct1, sizeof(ct1), "VIP包機：%s (%s -> %s · %dkm)", am_charter_title(g_am.charter_type), co->iata, cd->iata, cdist);
+    snprintf(ct2, sizeof(ct2), "合約報酬：%s + %d PTS (已完成 %d 次)", crw, g_am.charter_pts, g_am.charter_done_cnt);
+    ui_draw_str(mx + 14, 126, ct1, mw - 256, COL_TEXT);
+    ui_draw_str(mx + 14, 154, ct2, mw - 256, COL_GREEN);
+    ui_fill_rrect(mx + mw - 236, 130, 126, 38, 8, COL_GREEN); hal_set_text_bg(COL_GREEN); ui_draw_str(mx + mw - 224, 140, "派待命機承接", 104, COL_WHITE);
+    ui_fill_rrect(mx + mw - 102, 130, 88, 38, 8, COL_PANEL_SUB); ui_draw_rrect(mx + mw - 102, 130, 88, 38, 8, COL_BORDER);
+    hal_set_text_bg(COL_PANEL_SUB); ui_draw_str(mx + mw - 90, 140, "換合約", 64, COL_TEXT);
 
     int col_w = (mw - 12) / 2;
-    for (int slot = 0; slot < 8; slot++) {
+    for (int slot = 0; slot < 6; slot++) {
         int idx = g_ach_scroll * 2 + slot; if (idx >= AM_NUM_ACH) break;
-        int r = slot / 2, c = slot % 2, ax = mx + c * (col_w + 12), ay = 184 + r * 66;
+        int r = slot / 2, c = slot % 2, ax = mx + c * (col_w + 12), ay = 198 + r * 68;
         int unl = g_am.ach_unlocked[idx];
-        ui_card(ax, ay, col_w, 58, 10, COL_WHITE, unl ? COL_GREEN : COL_BORDER, COL_SHADOW, unl, COL_GREEN); hal_set_text_bg(COL_WHITE);
+        ui_card(ax, ay, col_w, 60, 10, COL_WHITE, unl ? COL_GREEN : COL_BORDER, COL_SHADOW, unl, COL_GREEN); hal_set_text_bg(COL_WHITE);
         char rw[24], nm[64]; fmt_money(am_ach_reward(idx), rw, sizeof(rw));
         snprintf(nm, sizeof(nm), "%s (%s)", am_ach_name(idx), rw);
         ui_draw_str(ax + 12, ay + 8, nm, col_w - 64, unl ? COL_GREEN : COL_TEXT);
-        ui_draw_str(ax + 12, ay + 32, am_ach_desc(idx), col_w - 24, COL_MUTED);
+        ui_draw_str(ax + 12, ay + 34, am_ach_desc(idx), col_w - 24, COL_MUTED);
         if (unl) ui_draw_badge(ax + col_w - 52, ay + 10, "DONE", COL_GREEN, COL_WHITE);
     }
     hal_set_text_bg(COL_BG_LIGHT);
-    ui_draw_str(mx, sh - 28, g_toast[0] ? g_toast : "點上方卡片用 PAX Points 兌換獎勵 · 底部左右翻頁看 16 成就", mw, COL_BLUE);
+    ui_draw_str(mx, sh - 28, g_toast[0] ? g_toast : "承接 VIP 包機賺取高額現金與積分 · 底部左右翻頁看全部成就", mw, COL_BLUE);
 }
 
-/* 還原截圖 1：藍天白雲「選擇你的首架起始客機」A320-200 vs B737-800！ */
 static void render_starter_aircraft_screen(int sw, int sh) {
     ui_draw_daylight_sky_clouds(sw, sh);
     int mw = 620, mh = 386, mx = (sw - mw) / 2, my = (sh - mh) / 2;
@@ -1045,7 +1154,7 @@ static void render_starter_aircraft_screen(int sw, int sh) {
         snprintf(rows[2], sizeof(rows[2]), "航程 Range      : %u km", (unsigned)m->range_km);
         snprintf(rows[3], sizeof(rows[3]), "速度 Speed      : %u kph", (unsigned)m->speed_kmh);
         snprintf(rows[4], sizeof(rows[4]), "最短跑道 Runway : %u ft", (unsigned)m->runway_ft);
-        snprintf(rows[5], sizeof(rows[5]), "CO2 排放        : %u kg/pax", (unsigned)m->co2_kg);
+        snprintf(rows[5], sizeof(rows[5]), "CO2 排放        : 0.%02u kg/pax/km", (unsigned)m->co2_kg);
         snprintf(rows[6], sizeof(rows[6]), "發動機 Engine   : %s", am_aircraft_engine_name(m_ids[i]));
         for (int r = 0; r < 7; r++) {
             ui_draw_str(cx + 14, cy + 112 + r * 22, rows[r], cw - 24, (r == 1 || r == 2) ? COL_TEXT : COL_MUTED);
@@ -1122,7 +1231,7 @@ static void render_shop_detail(int sw, int sh) {
     snprintf(s1, sizeof(s1), "售價：%s  ·  發動機：%s", pr, am_aircraft_engine_name(g_shop_detail_model));
     snprintf(s2, sizeof(s2), "航程：%u km  ·  巡航：%u kph", (unsigned)m->range_km, (unsigned)m->speed_kmh);
     snprintf(s3, sizeof(s3), "%s：%u  ·  最短跑道：%u ft", m->is_cargo ? "載貨(噸)" : "總座空間", (unsigned)m->cap, (unsigned)m->runway_ft);
-    snprintf(s4, sizeof(s4), "油耗：%u Lbs/km · CO2：%u · A檢：%uh", (unsigned)m->fuel_lbs_km, (unsigned)m->co2_kg, (unsigned)m->acheck_hrs);
+    snprintf(s4, sizeof(s4), "油耗：%u Lbs/km · CO2：0.%02u · A檢：%uh", (unsigned)m->fuel_lbs_km, (unsigned)m->co2_kg, (unsigned)m->acheck_hrs);
     ui_draw_str(mx + 294, my + 44, s1, 330, COL_AMBER);
     ui_draw_str(mx + 294, my + 70, s2, 330, COL_TEXT);
     ui_draw_str(mx + 294, my + 96, s3, 330, COL_TEXT);
@@ -1192,7 +1301,9 @@ static void render_route_modal(int sw, int sh) {
 
     /* 每日需求 + 手動自訂票價 Y / J / F (左半減價、右半加價!) */
     hal_set_text_bg(COL_WHITE);
-    char dem[128]; snprintf(dem, sizeof(dem), "每日需求 Daily Demand：經濟 Y %u  ·  商務 J %u  ·  頭等 F %u  (點左右調價)", (unsigned)ad->dem_y, (unsigned)ad->dem_j, (unsigned)ad->dem_f);
+    int rdy = 0, rdj = 0, rdf = 0, rdc = 0;
+    am_calc_route_demand(g_am.hubs[g_rt_orig_hub_slot % g_am.hub_count], g_rt_dest_ap, &rdy, &rdj, &rdf, &rdc);
+    char dem[128]; snprintf(dem, sizeof(dem), "雙邊每日需求：經濟 Y %d · 商務 J %d · 頭等 F %d · 貨 %d噸", rdy, rdj, rdf, rdc);
     ui_draw_str(mx + 20, my + 136, dem, mw - 40, COL_MUTED);
 
     int prices[3] = { g_rt_py, g_rt_pj, g_rt_pf };
@@ -1230,11 +1341,15 @@ static void render_route_modal(int sw, int sh) {
     int spd = 0, sec = 0; int64_t fuel_need = 0;
     am_calc_leg_preview(fp->model_idx, dist, g_rt_ci, fp->mod_speed, fp->mod_fuel, &spd, &sec, &fuel_need);
     hal_set_text_bg(COL_WHITE);
-    char pv1[128], pv2[128];
-    snprintf(pv1, sizeof(pv1), "單程距離：%d km · 巡航：%d kph · 飛行時間：%02d:%02d:00", dist, spd, sec / 3600, (sec % 3600) / 60);
-    snprintf(pv2, sizeof(pv2), "單程油耗：%lld lbs · 開航費 Route Fee：$%d", (long long)fuel_need, am_calc_route_fee(dist));
+    int64_t est_rev = 0, est_fc = 0;
+    int64_t est_net = am_estimate_leg_profit(fp->model_idx, dist, fp->seats_y, fp->seats_j, fp->seats_f,
+                                             g_rt_py, g_rt_pj, g_rt_pf, g_rt_ci, fp->mod_fuel, &est_rev, &est_fc);
+    char n1[24], n2[24], pv1[128], pv2[128];
+    fmt_money(est_net, n1, sizeof(n1)); fmt_money(est_net * 2, n2, sizeof(n2));
+    snprintf(pv1, sizeof(pv1), "真實大圓距離：%d km · %d kph · 航時 %02d:%02d · 油耗 %lld lbs", dist, spd, sec / 3600, (sec % 3600) / 60, (long long)fuel_need);
+    snprintf(pv2, sizeof(pv2), "預估單程淨利：%s (來回 %s) · 開航費 $%d", n1, n2, am_calc_route_fee(dist));
     ui_draw_str(mx + 20, my + 306, pv1, mw - 40, (dist > m->range_km && g_rt_stop_ap < 0) ? COL_RED : COL_TEXT);
-    ui_draw_str(mx + 20, my + 332, pv2, mw - 40, COL_BLUE);
+    ui_draw_str(mx + 20, my + 332, pv2, mw - 40, (est_net > 0) ? COL_GREEN : COL_RED);
 
     ui_fill_rrect(mx + 20, my + mh - 52, 290, 40, 10, COL_GREEN); hal_set_text_bg(COL_GREEN); ui_draw_str(mx + 96, my + mh - 41, "確認開通雙向航線", 150, COL_WHITE);
     ui_fill_rrect(mx + 330, my + mh - 52, 290, 40, 10, COL_PANEL_SUB); ui_draw_rrect(mx + 330, my + mh - 52, 290, 40, 10, COL_BORDER);
@@ -1260,19 +1375,20 @@ static void render_plane_modal(int sw, int sh) {
         ui_fill_rrect(mx + 394, my + 56, 48, 30, 6, COL_AMBER); hal_set_text_bg(COL_AMBER); ui_draw_str(mx + 404, my + 62, "F+", 32, COL_WHITE);
     }
 
-    char opts[7][72];
+    char opts[8][72];
     snprintf(opts[0], sizeof(opts[0]), "修復機體磨損 (目前 %d%%)", fp->wear_pct);
     snprintf(opts[1], sizeof(opts[1]), "執行 A-Check 大檢 (剩 %dh / 重置 %uh)", fp->acheck_hrs_left, (unsigned)m->acheck_hrs);
     snprintf(opts[2], sizeof(opts[2]), "引擎改裝 +10%% 速度 [%s]", fp->mod_speed ? "已安裝" : "可改裝");
     snprintf(opts[3], sizeof(opts[3]), "翼尖改裝 -10%% 油耗 [%s]", fp->mod_fuel ? "已安裝" : "可改裝");
     snprintf(opts[4], sizeof(opts[4]), "環保改裝 -10%% CO2  [%s]", fp->mod_co2 ? "已安裝" : "可改裝");
     snprintf(opts[5], sizeof(opts[5]), "雙向往返模式：[%s] (點擊切換)", fp->auto_return ? "自動往返" : "手動單段");
-    snprintf(opts[6], sizeof(opts[6]), "出售此架飛機回收資金");
-    for (int i = 0; i < 7; i++) {
-        int ry = my + 112 + i * 42;
-        uint32_t bg = (i == g_pl_sel) ? ((i == 6) ? COL_RED : COL_BLUE) : COL_PANEL_SUB;
-        ui_fill_rrect(mx + 20, ry, mw - 40, 34, 8, bg); if (i != g_pl_sel) ui_draw_rrect(mx + 20, ry, mw - 40, 34, 8, COL_BORDER);
-        hal_set_text_bg(bg); ui_draw_str(mx + 34, ry + 8, opts[i], mw - 68, (i == g_pl_sel) ? COL_WHITE : COL_TEXT);
+    snprintf(opts[6], sizeof(opts[6]), "停飛封存 Ground A/C：[%s]", fp->status == 3 ? "封存中(點恢復)" : "服役中(點封存)");
+    snprintf(opts[7], sizeof(opts[7]), "出售此架飛機回收資金");
+    for (int i = 0; i < 8; i++) {
+        int ry = my + 104 + i * 38;
+        uint32_t bg = (i == g_pl_sel) ? ((i == 7) ? COL_RED : COL_BLUE) : COL_PANEL_SUB;
+        ui_fill_rrect(mx + 20, ry, mw - 40, 32, 8, bg); if (i != g_pl_sel) ui_draw_rrect(mx + 20, ry, mw - 40, 32, 8, COL_BORDER);
+        hal_set_text_bg(bg); ui_draw_str(mx + 34, ry + 7, opts[i], mw - 68, (i == g_pl_sel) ? COL_WHITE : COL_TEXT);
     }
 }
 

@@ -53,5 +53,6 @@ const char *am_mfg_name(int mfg);
 const char *am_aircraft_engine_name(int model_idx);
 
 int  am_calc_distance_km(int ap1_idx, int ap2_idx);
+void am_calc_route_demand(int ap1_idx, int ap2_idx, int *out_y, int *out_j, int *out_f, int *out_cargo);
 
 #endif

@@ -17,6 +17,9 @@ void ui_draw_str(int x, int y, const char *utf8, int max_w, uint32_t rgb);
 /* 明亮日間航空世界地圖 (天藍海洋 + 自然綠/沙黃陸地，完全對標 AM4 官網!) */
 void ui_draw_daylight_sky_clouds(int w, int h);
 void ui_draw_world_map_daylight(int mx, int my, int mw, int mh);
+void ui_draw_world_map_hd(int mx, int my, int mw, int mh, int zoom, int pan_x, int pan_y);
+int  ui_latlon_to_xy_view(int lat10, int lon10, int mx, int my, int mw, int mh, int zoom, int pan_x, int pan_y, int *ox, int *oy);
+void ui_draw_route_arc_view(int lat1, int lon1, int lat2, int lon2, int mx, int my, int mw, int mh, int zoom, int pan_x, int pan_y, int progress_pct, int is_return_leg, uint32_t arc_col, uint32_t plane_col);
 void ui_latlon_to_xy(int lat10, int lon10, int mx, int my, int mw, int mh, int *ox, int *oy);
 void ui_draw_route_arc(int lat1, int lon1, int lat2, int lon2, int mx, int my, int mw, int mh,
                        int progress_pct, int is_return_leg, uint32_t arc_col, uint32_t plane_col);

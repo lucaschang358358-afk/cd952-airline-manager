@@ -88,17 +88,21 @@ int am_effective_reputation(void) {
     int rep = g_am.base_reputation;
     if (g_am.mkt_airline_secs > 0) rep += g_am.mkt_airline_bonus;
     if (g_am.mkt_eco_secs > 0) rep += 10;
+    if (g_am.catering_level == 1) rep += 3;
+    else if (g_am.catering_level == 2) rep += 7;
+    if (g_am.alliance_id > 0) rep += 6;
     if (g_am.staff_morale < 60) rep -= (60 - g_am.staff_morale) / 3;
-    if (rep < 20) rep = 20;
+    if (rep < 25) rep = 25;
     if (rep > 99) rep = 99;
     return rep;
 }
 
 int am_calc_auto_ticket(int dist_km, int cabin, int realism) {
-    if (cabin == 0) return ((realism ? 30 : 40) * dist_km) / 100 + 150;
-    if (cabin == 1) return ((realism ? 60 : 80) * dist_km) / 100 + 500;
-    if (cabin == 2) return ((realism ? 90 : 120) * dist_km) / 100 + 1000;
-    return ((realism ? 85 : 105) * dist_km) / 100 + 380;
+    /* 真實 AM4 票價公式 (Easy vs Realism) */
+    if (cabin == 0) return ((realism ? 33 : 44) * dist_km) / 100 + (realism ? 150 : 170);
+    if (cabin == 1) return ((realism ? 66 : 88) * dist_km) / 100 + (realism ? 500 : 560);
+    if (cabin == 2) return ((realism ? 99 : 132) * dist_km) / 100 + (realism ? 1000 : 1200);
+    return ((realism ? 95 : 118) * dist_km) / 100 + 420;
 }
 
 int am_calc_route_fee(int dist_km) {
@@ -254,6 +258,7 @@ void am_sim_new_company(const char *name, const char *iata, int hub_ap_idx,
     p0->acheck_hrs_left = sm->acheck_hrs;
     g_am.fleet_count = 1;
 
+    am_roll_new_charter();
     g_am.last_unix_time = hal_get_unix_time();
     snprintf(g_am.last_notice, sizeof(g_am.last_notice), "歡迎成立 %s！已交付首架 %s，請設定雙向航線", g_am.airline_name, sm->model);
     am_sim_save();
@@ -261,7 +266,8 @@ void am_sim_new_company(const char *name, const char *iata, int hub_ap_idx,
 
 void am_sim_save(void) {
     if (!g_am.initialized) return;
-    g_am.magic = AM_SAVE_MAGIC; g_am.last_unix_time = hal_get_unix_time();
+    g_am.magic = AM_SAVE_MAGIC; am_roll_new_charter();
+    g_am.last_unix_time = hal_get_unix_time();
     FILE *f = fopen(hal_get_save_path(), "wb"); if (!f) return;
     fwrite(&g_am, sizeof(g_am), 1, f); fclose(f);
 }
@@ -290,7 +296,7 @@ static void start_leg_flight(FleetPlane *fp) {
     const AircraftModel *m = am_aircraft_get(fp->model_idx);
     int spd = 0, sec = 0; int64_t fuel_need = 0;
     am_calc_leg_preview(fp->model_idx, fp->dist_km, fp->cost_index, fp->mod_speed, fp->mod_fuel, &spd, &sec, &fuel_need);
-    int64_t co2_need = ((int64_t)fp->dist_km * (int64_t)m->co2_kg * (int64_t)(m->is_cargo ? 12 : m->cap)) / 1000LL;
+    int64_t co2_need = ((int64_t)fp->dist_km * (int64_t)m->co2_kg * (int64_t)(m->is_cargo ? 10 : m->cap)) / 100LL;
     if (fp->mod_co2) co2_need = (co2_need * 90) / 100;
     if (g_am.fuel_lbs < fuel_need) return;
 
@@ -320,7 +326,7 @@ static void complete_flight(int fleet_idx) {
     FleetPlane *fp = &g_am.fleet[fleet_idx];
     const AircraftModel *m = am_aircraft_get(fp->model_idx);
     int rep = am_effective_reputation();
-    int base_load = rep - 10 + rng_range(-4, 9);
+    int base_load = 22 + (rep * 78) / 100 + rng_range(-3, 6);
     if (g_am.event_id == 3) base_load += 15;
 
     int64_t rev = 0; int carried = 0;
@@ -338,7 +344,7 @@ static void complete_flight(int fleet_idx) {
         int64_t rj = (int64_t)pj * (int64_t)fp->price_j;
         int64_t rf = (int64_t)pf * (int64_t)fp->price_f;
         if (g_am.event_id == 5) { rj = (rj * 112) / 100; rf = (rf * 112) / 100; }
-        rev = ry + rj + rf; carried = py + pj + pf;
+        rev = ry + rj + rf; if (g_am.catering_level == 1) rev = (rev * 106) / 100; else if (g_am.catering_level == 2) rev = (rev * 114) / 100; carried = py + pj + pf;
         g_am.total_pax_carried += carried;
     }
 
@@ -649,4 +655,142 @@ int am_spend_points(int type, char *out_msg, int msg_sz) {
     else if (type == 1) { g_am.fuel_cap += 2000000LL; g_am.fuel_lbs += 1000000LL; snprintf(out_msg, (size_t)msg_sz, "兌換成功！油槽 +2M 並贈 1M 油"); }
     else { if (g_am.base_reputation < 95) g_am.base_reputation += 5; snprintf(out_msg, (size_t)msg_sz, "兌換成功！基礎聲譽永久 +5%%"); }
     am_sim_save(); return 1;
+}
+
+
+const char *am_alliance_name(int id) {
+    switch (id) {
+        case 1: return "Star Alliance 星空聯盟";
+        case 2: return "SkyTeam 天合聯盟";
+        case 3: return "oneworld 寰宇一家";
+        default: return "獨立營運 (未加入聯盟)";
+    }
+}
+
+const char *am_charter_title(int type) {
+    switch (type) {
+        case 0: return "國際運動代表隊包機";
+        case 1: return "跨國領袖高峰會專機";
+        case 2: return "國際科技大展商務包機";
+        default: return "緊急醫療物資專機";
+    }
+}
+
+void am_roll_new_charter(void) {
+    int ac = am_airport_count();
+    if (ac < 2) return;
+    g_am.charter_orig = g_am.hubs[0];
+    int dest = rng_range(0, ac - 1);
+    if (dest == g_am.charter_orig) dest = (dest + 3) % ac;
+    g_am.charter_dest = dest;
+    g_am.charter_type = rng_range(0, 3);
+    int dist = am_calc_distance_km(g_am.charter_orig, g_am.charter_dest);
+    g_am.charter_reward = 280000LL + (int64_t)dist * 95LL;
+    g_am.charter_pts = 15 + (dist / 1200);
+}
+
+int64_t am_estimate_leg_profit(int model_idx, int dist_km, int sy, int sj, int sf,
+                               int py, int pj, int pf, int cost_index, int mod_fuel,
+                               int64_t *out_rev, int64_t *out_fuel_cost) {
+    const AircraftModel *m = am_aircraft_get(model_idx);
+    int rep = am_effective_reputation();
+    int base_load = 22 + (rep * 78) / 100;
+    int64_t rev = 0;
+    if (m->is_cargo) {
+        int lf = ticket_load_factor(py, am_calc_auto_ticket(dist_km, 3, g_am.realism_mode), base_load);
+        rev = (int64_t)((sy * lf) / 100) * (int64_t)py;
+    } else {
+        int ly = ticket_load_factor(py, am_calc_auto_ticket(dist_km, 0, g_am.realism_mode), base_load);
+        int lj = ticket_load_factor(pj, am_calc_auto_ticket(dist_km, 1, g_am.realism_mode), base_load);
+        int lf = ticket_load_factor(pf, am_calc_auto_ticket(dist_km, 2, g_am.realism_mode), base_load);
+        rev = (int64_t)((sy * ly) / 100) * py + (int64_t)((sj * lj) / 100) * pj + (int64_t)((sf * lf) / 100) * pf;
+        if (g_am.catering_level == 1) rev = (rev * 106) / 100;
+        else if (g_am.catering_level == 2) rev = (rev * 114) / 100;
+    }
+    int spd = 0, sec = 0; int64_t fuel_lbs = 0;
+    am_calc_leg_preview(model_idx, dist_km, cost_index, 0, mod_fuel, &spd, &sec, &fuel_lbs);
+    int64_t fcost = (fuel_lbs * (int64_t)g_am.fuel_price) / 1000LL;
+    if (out_rev) *out_rev = rev;
+    if (out_fuel_cost) *out_fuel_cost = fcost;
+    return rev - fcost;
+}
+
+int am_ground_plane(int fleet_idx, char *out_msg, int msg_sz) {
+    if (fleet_idx < 0 || fleet_idx >= g_am.fleet_count) return 0;
+    FleetPlane *fp = &g_am.fleet[fleet_idx];
+    if (fp->status == 1 || fp->status == 2) { snprintf(out_msg, (size_t)msg_sz, "執勤或維修中無法停飛封存"); return 0; }
+    if (fp->status == 3) {
+        fp->status = 0;
+        snprintf(out_msg, (size_t)msg_sz, "%s 已解除封存，恢復待命！", fp->reg);
+    } else {
+        fp->status = 3;
+        snprintf(out_msg, (size_t)msg_sz, "%s 已停飛封存 (Ground A/C)", fp->reg);
+    }
+    am_sim_save(); return 1;
+}
+
+int am_repair_all(char *out_msg, int msg_sz) {
+    int cnt = 0; char tmp[96];
+    for (int i = 0; i < g_am.fleet_count; i++) {
+        if (g_am.fleet[i].status == 0 && g_am.fleet[i].wear_pct > 0) {
+            if (am_repair_plane(i, tmp, sizeof(tmp))) cnt++;
+        }
+    }
+    snprintf(out_msg, (size_t)msg_sz, cnt > 0 ? "一鍵修復完成！共修復 %d 架飛機" : "目前無需修復的待命飛機", cnt);
+    return cnt;
+}
+
+int am_acheck_all(char *out_msg, int msg_sz) {
+    int cnt = 0; char tmp[96];
+    for (int i = 0; i < g_am.fleet_count; i++) {
+        if (g_am.fleet[i].status == 0 && g_am.fleet[i].acheck_hrs_left <= 60) {
+            if (am_acheck_plane(i, tmp, sizeof(tmp))) cnt++;
+        }
+    }
+    snprintf(out_msg, (size_t)msg_sz, cnt > 0 ? "一鍵大檢：已送檢 %d 架飛機" : "所有待命飛機 A-Check 時數皆充足", cnt);
+    return cnt;
+}
+
+int am_set_catering(int level, char *out_msg, int msg_sz) {
+    if (level < 0 || level > 2) return 0;
+    if (g_am.catering_level == level) { snprintf(out_msg, (size_t)msg_sz, "目前已是此餐飲等級"); return 0; }
+    int64_t cost = (level == 1) ? 450000LL : ((level == 2) ? 1500000LL : 0LL);
+    if (cost > 0 && g_am.cash < cost) { snprintf(out_msg, (size_t)msg_sz, "升級機上餐飲資金不足 ($%lld)", (long long)cost); return 0; }
+    g_am.cash -= cost; g_am.total_expenses += cost;
+    g_am.catering_level = level;
+    snprintf(out_msg, (size_t)msg_sz, level == 2 ? "升級五星主廚餐飲！營收+14%% 聲譽+7%%" : (level == 1 ? "啟用經濟輕食餐飲！營收+6%% 聲譽+3%%" : "已關閉機上餐飲"));
+    check_achievements(); am_sim_save(); return 1;
+}
+
+int am_join_alliance(int alliance_id, char *out_msg, int msg_sz) {
+    if (alliance_id < 1 || alliance_id > 3) return 0;
+    if (g_am.alliance_id == alliance_id) { snprintf(out_msg, (size_t)msg_sz, "已屬於 %s", am_alliance_name(alliance_id)); return 0; }
+    int64_t fee = 1000000LL;
+    if (g_am.cash < fee) { snprintf(out_msg, (size_t)msg_sz, "加入航空聯盟需入會費 $1,000,000"); return 0; }
+    g_am.cash -= fee; g_am.total_expenses += fee;
+    g_am.alliance_id = alliance_id;
+    snprintf(out_msg, (size_t)msg_sz, "成功加入【%s】！全航線聲譽永久 +6%%", am_alliance_name(alliance_id));
+    check_achievements(); am_sim_save(); return 1;
+}
+
+int am_run_charter_with_plane(int fleet_idx, char *out_msg, int msg_sz) {
+    if (fleet_idx < 0 || fleet_idx >= g_am.fleet_count) { snprintf(out_msg, (size_t)msg_sz, "無可用待命飛機執行包機"); return 0; }
+    FleetPlane *fp = &g_am.fleet[fleet_idx];
+    if (fp->status != 0) { snprintf(out_msg, (size_t)msg_sz, "請挑選停機待命的飛機執行包機"); return 0; }
+    int dist = am_calc_distance_km(g_am.charter_orig, g_am.charter_dest);
+    const AircraftModel *m = am_aircraft_get(fp->model_idx);
+    if (dist > m->range_km * 2) { snprintf(out_msg, (size_t)msg_sz, "%s 航程不足以承接此長程包機！", fp->reg); return 0; }
+    int64_t fuel_need = (int64_t)dist * (int64_t)m->fuel_lbs_km;
+    if (g_am.fuel_lbs < fuel_need) { snprintf(out_msg, (size_t)msg_sz, "燃油不足承接包機 (需 %lld lbs)", (long long)fuel_need); return 0; }
+
+    g_am.fuel_lbs -= fuel_need;
+    g_am.cash += g_am.charter_reward;
+    g_am.total_revenue += g_am.charter_reward;
+    g_am.pax_points += g_am.charter_pts;
+    g_am.charter_done_cnt++;
+    fp->wear_pct += 4; if (fp->wear_pct > 100) fp->wear_pct = 100;
+
+    snprintf(out_msg, (size_t)msg_sz, "包機任務完成！入帳 +$%lld & +%d PTS！", (long long)g_am.charter_reward, g_am.charter_pts);
+    am_roll_new_charter();
+    check_achievements(); am_sim_save(); return 1;
 }

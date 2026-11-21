@@ -71,7 +71,11 @@ typedef struct {
 static lcd_t *g_lcd = NULL;
 static int g_w = 800, g_h = 480, g_is_xrgb = 1;
 static void *g_backbuf = NULL;
+static void *g_front_shadow = NULL;
 static size_t g_fb_bytes = 0;
+static int g_first_present = 1;
+static TextCmd g_prev_text_q[MAX_TEXT_QUEUE];
+static int g_prev_text_q_len = 0;
 
 static TextCmd g_text_q[MAX_TEXT_QUEUE];
 static int g_text_q_len = 0;
@@ -239,29 +243,80 @@ void hal_dim_rect(int rx, int ry, int rw, int rh) {
     }
 }
 
+/* 智慧局部髒區更新 (Smart Dirty-Band Blit)：只重繪有變動的掃描線與文字，徹底根除整畫面閃爍！ */
 void hal_present(void) {
     if (!g_lcd || !g_lcd->surface || !g_lcd->surface->buffer || !g_backbuf) return;
-    memcpy(g_lcd->surface->buffer, g_backbuf, g_fb_bytes);
-    if (g_text_q_len > 0) {
-        SetFontType(MONOSPACE_CJK);
-        UTF16 u16[192];
-        for (int i = 0; i < g_text_q_len; i++) {
-            TextCmd *tc = &g_text_q[i];
-            int dx = tc->x < 0 ? 0 : tc->x, mw = tc->max_w;
-            if (dx + mw > g_w) mw = g_w - dx;
-            if (mw <= 8) continue;
-            utf8_to_utf16(tc->text, (int)strlen(tc->text), u16, 192);
-            rgbSetColor(tc->fg);
-            rgbSetBkColor(tc->bg);
-            WriteAlignString(dx, tc->y, u16, mw, STR_ALIGN_LEFT, PRINT_NONE);
+    size_t row_bytes = (size_t)g_w * (g_is_xrgb ? 4u : 2u);
+    uint8_t *dst = (uint8_t *)g_lcd->surface->buffer;
+    const uint8_t *src = (const uint8_t *)g_backbuf;
+    uint8_t *shd = (uint8_t *)g_front_shadow;
+
+    int y_min = g_h, y_max = -1;
+    if (g_first_present || !shd) {
+        y_min = 0; y_max = g_h - 1;
+        g_first_present = 0;
+    } else {
+        for (int y = 0; y < g_h; y++) {
+            if (memcmp(src + (size_t)y * row_bytes, shd + (size_t)y * row_bytes, row_bytes) != 0) {
+                if (y < y_min) y_min = y;
+                y_max = y;
+            }
         }
-        g_text_q_len = 0;
+        /* 比對文字層是否有增減或內容變動 */
+        if (g_text_q_len != g_prev_text_q_len ||
+            memcmp(g_text_q, g_prev_text_q, (size_t)g_text_q_len * sizeof(TextCmd)) != 0) {
+            int max_n = g_text_q_len > g_prev_text_q_len ? g_text_q_len : g_prev_text_q_len;
+            for (int i = 0; i < max_n; i++) {
+                int diff = (i >= g_text_q_len || i >= g_prev_text_q_len ||
+                            memcmp(&g_text_q[i], &g_prev_text_q[i], sizeof(TextCmd)) != 0);
+                if (diff) {
+                    if (i < g_text_q_len) {
+                        if (g_text_q[i].y < y_min) y_min = g_text_q[i].y;
+                        if (g_text_q[i].y + 20 > y_max) y_max = g_text_q[i].y + 20;
+                    }
+                    if (i < g_prev_text_q_len) {
+                        if (g_prev_text_q[i].y < y_min) y_min = g_prev_text_q[i].y;
+                        if (g_prev_text_q[i].y + 20 > y_max) y_max = g_prev_text_q[i].y + 20;
+                    }
+                }
+            }
+        }
     }
+
+    if (y_min < 0) y_min = 0;
+    if (y_max >= g_h) y_max = g_h - 1;
+
+    if (y_min <= y_max) {
+        size_t off = (size_t)y_min * row_bytes;
+        size_t span = (size_t)(y_max - y_min + 1) * row_bytes;
+        memcpy(dst + off, src + off, span);
+        if (shd) memcpy(shd + off, src + off, span);
+
+        if (g_text_q_len > 0) {
+            SetFontType(MONOSPACE_CJK);
+            UTF16 u16[192];
+            for (int i = 0; i < g_text_q_len; i++) {
+                TextCmd *tc = &g_text_q[i];
+                if (tc->y + 20 < y_min || tc->y > y_max) continue;
+                int dx = tc->x < 0 ? 0 : tc->x, mw = tc->max_w;
+                if (dx + mw > g_w) mw = g_w - dx;
+                if (mw <= 8) continue;
+                utf8_to_utf16(tc->text, (int)strlen(tc->text), u16, 192);
+                rgbSetColor(tc->fg);
+                rgbSetBkColor(tc->bg);
+                WriteAlignString(dx, tc->y, u16, mw, STR_ALIGN_LEFT, PRINT_NONE);
+            }
+        }
+    }
+
+    memcpy(g_prev_text_q, g_text_q, (size_t)g_text_q_len * sizeof(TextCmd));
+    g_prev_text_q_len = g_text_q_len;
+    g_text_q_len = 0;
 }
 
 int64_t hal_get_unix_time(void) { return (int64_t)time(NULL); }
 uint32_t hal_get_seed(void) { return (uint32_t)time(NULL) ^ 0xA4414952u; }
-const char *hal_get_save_path(void) { return "C:\\cd952_am4_v3.sav"; }
+const char *hal_get_save_path(void) { return "C:\\cd952_am4_v4.sav"; }
 const char *hal_get_extra_airports_csv(void) { return "C:\\airports.csv"; }
 void hal_request_quit(void) { g_running = 0; }
 
@@ -303,6 +358,7 @@ int main(void) {
     g_fb_bytes = (size_t)g_w * (size_t)g_h * (g_is_xrgb ? 4u : 2u);
     g_backbuf = malloc(g_fb_bytes);
     if (!g_backbuf) return 1;
+    g_front_shadow = malloc(g_fb_bytes);
 
     am_ui_init();
     am_ui_render();
@@ -341,6 +397,7 @@ int main(void) {
     }
 
     am_ui_shutdown();
+    free(g_front_shadow);
     free(g_backbuf);
     return 0;
 }

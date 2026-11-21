@@ -1,5 +1,5 @@
 project('cd952-airline-manager', 'c',
-  version : '3.0.0',
+  version : '4.0.0',
   default_options : ['warning_level=2'])
 
 c = meson.get_compiler('c')
@@ -14,7 +14,7 @@ touch_adapt_h = custom_target('muteki-touch-adapt',
   command: [py3, '@INPUT@', '@OUTPUT@'])
 
 game_elf = executable('cd952-am4',
-  [touch_adapt_h, 'ui_gfx.c', 'am_assets.c', 'am_data.c', 'am_sim.c', 'am_ui.c', 'platform_muteki.c'],
+  [touch_adapt_h, 'am_map_rom.c', 'ui_gfx.c', 'am_assets.c', 'am_data.c', 'am_sim.c', 'am_ui.c', 'platform_muteki.c'],
   name_suffix: 'elf',
   dependencies: mutekix_lib,
   install : false,
