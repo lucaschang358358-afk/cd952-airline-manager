@@ -6,7 +6,7 @@
 
 AmWorld g_am;
 
-static const int SPEED_MULTS[4] = { 1, 10, 60, 360 };
+static const int SPEED_MULTS[5] = { 1, 10, 60, 360, 1000 };
 static uint64_t g_rng_state = 0x853C49E6748FEA9BULL;
 
 static uint32_t rng_u32(void) {
@@ -20,7 +20,7 @@ static void push_hist(int *arr, int val) { for (int i = 0; i < AM_PRICE_HIST - 1
 
 int am_sim_speed_mult(void) {
     int i = g_am.speed_mult_idx;
-    return SPEED_MULTS[(i >= 0 && i < 4) ? i : 0];
+    return SPEED_MULTS[(i >= 0 && i < 5) ? i : 0];
 }
 
 const char *am_event_name(int id) {
@@ -91,6 +91,7 @@ int am_effective_reputation(void) {
     if (g_am.catering_level == 1) rep += 3;
     else if (g_am.catering_level == 2) rep += 7;
     if (g_am.alliance_id > 0) rep += 6;
+    rep += g_am.train_mgmt_lv * 2;
     if (g_am.staff_morale < 60) rep -= (60 - g_am.staff_morale) / 3;
     if (rep < 25) rep = 25;
     if (rep > 99) rep = 99;
@@ -127,6 +128,7 @@ void am_calc_leg_preview(int model_idx, int dist_km, int cost_index, int mod_spd
     int64_t fuel = (int64_t)dist_km * (int64_t)m->fuel_lbs_km;
     fuel = (fuel * (85 + ((cost_index - 50) * 30) / 150)) / 100;
     if (mod_fuel) fuel = (fuel * 90) / 100;
+    if (g_am.train_fuel_lv > 0) fuel = (fuel * (100 - g_am.train_fuel_lv * 2)) / 100;
     if (g_am.event_id == 6) fuel = (fuel * 108) / 100;
 
     if (out_spd_kmh) *out_spd_kmh = spd;
@@ -241,7 +243,8 @@ void am_sim_new_company(const char *name, const char *iata, int hub_ap_idx,
         g_am.co2_hist[i]  = g_am.co2_price + rng_range(-12, 12); if (g_am.co2_hist[i] < 100) g_am.co2_hist[i] = 100;
     }
 
-    g_am.base_reputation = 58; g_am.staff_salary_pct = 100; g_am.staff_morale = 88;
+    g_am.base_reputation = 62; g_am.staff_salary_pct = 100; g_am.staff_morale = 90;
+    g_am.staff_pilots = 12; g_am.staff_crew = 30; g_am.staff_engineers = 8; g_am.staff_techs = 10; g_am.training_points = 3;
     g_am.own_share_price = 25;
     for (int i = 0; i < AM_PRICE_HIST; i++) g_am.own_share_hist[i] = 25;
     init_rivals();
@@ -298,10 +301,11 @@ static void start_leg_flight(FleetPlane *fp) {
     am_calc_leg_preview(fp->model_idx, fp->dist_km, fp->cost_index, fp->mod_speed, fp->mod_fuel, &spd, &sec, &fuel_need);
     int64_t co2_need = ((int64_t)fp->dist_km * (int64_t)m->co2_kg * (int64_t)(m->is_cargo ? 10 : m->cap)) / 100LL;
     if (fp->mod_co2) co2_need = (co2_need * 90) / 100;
-    if (g_am.fuel_lbs < fuel_need) return;
-
-    g_am.fuel_lbs -= fuel_need;
-    g_am.co2_quotas -= co2_need;
+    if (!g_am.cheat_god_fuel) {
+        if (g_am.fuel_lbs < fuel_need) return;
+        g_am.fuel_lbs -= fuel_need;
+        g_am.co2_quotas -= co2_need;
+    }
     if (g_am.co2_quotas < 0 && g_am.base_reputation > 40) g_am.base_reputation--;
 
     fp->status = 1;
@@ -357,9 +361,14 @@ static void complete_flight(int fleet_idx) {
     fp->total_flights++; fp->total_profit += net;
     fp->status = 0; fp->flight_elapsed_sec = 0;
 
-    int flt_hrs = fp->flight_total_sec / 3600; if (flt_hrs < 1) flt_hrs = 1;
-    fp->acheck_hrs_left -= flt_hrs; if (fp->acheck_hrs_left < 0) fp->acheck_hrs_left = 0;
-    fp->wear_pct += 2 + (flt_hrs / 3); if (fp->wear_pct > 100) fp->wear_pct = 100;
+    if (!g_am.cheat_no_wear) {
+        int flt_hrs = fp->flight_total_sec / 3600; if (flt_hrs < 1) flt_hrs = 1;
+        fp->acheck_hrs_left -= flt_hrs; if (fp->acheck_hrs_left < 0) fp->acheck_hrs_left = 0;
+        int dw = 2 + (flt_hrs / 3);
+        if (g_am.train_maint_lv > 0) { dw = (dw * (100 - g_am.train_maint_lv * 10)) / 100; if (dw < 1) dw = 1; }
+        fp->wear_pct += dw; if (fp->wear_pct > 100) fp->wear_pct = 100;
+    } else { fp->wear_pct = 0; }
+    if ((g_am.total_flights_done % 3) == 0) g_am.training_points++;
     if (g_am.base_reputation < 75 && rng_range(0, 99) < 25) g_am.base_reputation++;
 
     /* 記錄真實雙向航段 (去程 TPE->SIN / 回程 SIN->TPE) */
@@ -503,7 +512,7 @@ int am_depart_plane(int fleet_idx, char *out_msg, int msg_sz) {
 
     int spd = 0, sec = 0; int64_t fuel_need = 0;
     am_calc_leg_preview(fp->model_idx, fp->dist_km, fp->cost_index, fp->mod_speed, fp->mod_fuel, &spd, &sec, &fuel_need);
-    if (g_am.fuel_lbs < fuel_need) { snprintf(out_msg, (size_t)msg_sz, "燃油不足！需 %lld lbs", (long long)fuel_need); return 0; }
+    if (!g_am.cheat_god_fuel && g_am.fuel_lbs < fuel_need) { snprintf(out_msg, (size_t)msg_sz, "燃油不足！需 %lld lbs", (long long)fuel_need); return 0; }
 
     start_leg_flight(fp);
     const AirportInfo *a_from = am_airport_get(fp->leg_dir == 0 ? fp->orig_ap : fp->dest_ap);
@@ -793,4 +802,109 @@ int am_run_charter_with_plane(int fleet_idx, char *out_msg, int msg_sz) {
     snprintf(out_msg, (size_t)msg_sz, "包機任務完成！入帳 +$%lld & +%d PTS！", (long long)g_am.charter_reward, g_am.charter_pts);
     am_roll_new_charter();
     check_achievements(); am_sim_save(); return 1;
+}
+
+
+int am_hire_staff(int dept, int count, char *out_msg, int msg_sz) {
+    if (count <= 0) return 0;
+    static const int UNIT_COST[4] = { 18000, 9000, 14000, 11000 };
+    static const char *DNM[4] = { "機師", "空服員", "工程師", "地勤技師" };
+    int64_t cost = (int64_t)UNIT_COST[dept & 3] * (int64_t)count;
+    if (g_am.cash < cost) { snprintf(out_msg, (size_t)msg_sz, "招募%s資金不足 ($%lld)", DNM[dept & 3], (long long)cost); return 0; }
+    g_am.cash -= cost; g_am.total_expenses += cost;
+    if (dept == 0) g_am.staff_pilots += count;
+    else if (dept == 1) g_am.staff_crew += count;
+    else if (dept == 2) g_am.staff_engineers += count;
+    else g_am.staff_techs += count;
+    if (g_am.staff_morale < 98) g_am.staff_morale += 2;
+    snprintf(out_msg, (size_t)msg_sz, "成功招募 %d 名%s！士氣提升", count, DNM[dept & 3]);
+    am_sim_save(); return 1;
+}
+
+int am_upgrade_training(int track, char *out_msg, int msg_sz) {
+    if (g_am.training_points <= 0) { snprintf(out_msg, (size_t)msg_sz, "訓練點數不足 (每飛3趟+1點)"); return 0; }
+    int *lv = (track == 0) ? &g_am.train_mgmt_lv : ((track == 1) ? &g_am.train_fuel_lv : &g_am.train_maint_lv);
+    if (*lv >= 5) { snprintf(out_msg, (size_t)msg_sz, "此項專業訓練已達滿級 Lv.5！"); return 0; }
+    (*lv)++; g_am.training_points--;
+    const char *tn[3] = { "管理聲譽(+2%)", "節油飛航(-2%油)", "精密維修(-10%磨損)" };
+    snprintf(out_msg, (size_t)msg_sz, "升級【%s】至 Lv.%d！", tn[track % 3], *lv);
+    am_sim_save(); return 1;
+}
+
+int am_claim_daily_bonus(char *out_msg, int msg_sz) {
+    int64_t now = hal_get_unix_time();
+    if (g_am.last_daily_bonus_ts > 0 && (now - g_am.last_daily_bonus_ts) < 3600 * 6) {
+        snprintf(out_msg, (size_t)msg_sz, "冷卻中！每 6 小時可領一次每日寶箱"); return 0;
+    }
+    g_am.last_daily_bonus_ts = now;
+    int64_t cash_b = 500000LL + (int64_t)am_airline_level() * 150000LL;
+    int pts_b = 20 + am_airline_level() * 2;
+    g_am.cash += cash_b; g_am.pax_points += pts_b; g_am.training_points += 1;
+    snprintf(out_msg, (size_t)msg_sz, "領取寶箱！+$%lld & +%d PTS & +1 訓練點！", (long long)cash_b, pts_b);
+    am_sim_save(); return 1;
+}
+
+/* ============================================================
+ * 外掛 / 上帝模式 (MOD / CHEAT ENGINE)
+ * ============================================================ */
+void am_cheat_add_cash(int64_t amount, char *out_msg, int msg_sz) {
+    g_am.cash += amount;
+    snprintf(out_msg, (size_t)msg_sz, "[外掛] 資金注入 +$%lld！", (long long)amount);
+    check_achievements(); am_sim_save();
+}
+
+void am_cheat_add_points(int pts, char *out_msg, int msg_sz) {
+    g_am.pax_points += pts;
+    g_am.training_points += 5;
+    snprintf(out_msg, (size_t)msg_sz, "[外掛] 積分 +%d PTS & 訓練點 +5！", pts);
+    am_sim_save();
+}
+
+void am_cheat_refill_all(char *out_msg, int msg_sz) {
+    if (g_am.fuel_cap < 10000000LL) g_am.fuel_cap = 10000000LL;
+    if (g_am.co2_cap  < 10000000LL) g_am.co2_cap  = 10000000LL;
+    g_am.fuel_lbs = g_am.fuel_cap;
+    g_am.co2_quotas = g_am.co2_cap;
+    snprintf(out_msg, (size_t)msg_sz, "[外掛] 油槽與 CO2 已免費擴滿至 10M！");
+    am_sim_save();
+}
+
+int am_cheat_instant_finish_flights(char *out_msg, int msg_sz) {
+    int done = 0;
+    for (int i = 0; i < g_am.fleet_count; i++) {
+        FleetPlane *fp = &g_am.fleet[i];
+        if (fp->active && fp->status == 1) {
+            complete_flight(i);
+            done++;
+        } else if (fp->active && fp->status == 2) {
+            fp->status = 0; fp->flight_elapsed_sec = 0; fp->wear_pct = 0;
+            fp->acheck_hrs_left = am_aircraft_get(fp->model_idx)->acheck_hrs;
+            done++;
+        }
+    }
+    snprintf(out_msg, (size_t)msg_sz, done > 0 ? "[外掛] 已瞬移完成 %d 架航班/維修並入帳！" : "[外掛] 目前沒有飛行中的班機", done);
+    am_sim_save(); return done;
+}
+
+void am_cheat_max_reputation(char *out_msg, int msg_sz) {
+    g_am.base_reputation = 99;
+    g_am.staff_morale = 100;
+    g_am.mkt_airline_secs = 24 * 3600; g_am.mkt_airline_bonus = 32;
+    g_am.mkt_eco_secs = 24 * 3600;
+    snprintf(out_msg, (size_t)msg_sz, "[外掛] 聲譽 99%% & 士氣 100%% & 全廣告滿檔！");
+    check_achievements(); am_sim_save();
+}
+
+void am_cheat_unlock_all_achs(char *out_msg, int msg_sz) {
+    int cnt = 0;
+    for (int i = 0; i < AM_NUM_ACH; i++) {
+        if (!g_am.ach_unlocked[i]) {
+            g_am.ach_unlocked[i] = 1;
+            g_am.cash += AM_ACHS[i].reward;
+            g_am.pax_points += 25;
+            cnt++;
+        }
+    }
+    snprintf(out_msg, (size_t)msg_sz, "[外掛] 已解鎖全部 %d 項成就並領光獎金！", cnt);
+    am_sim_save();
 }

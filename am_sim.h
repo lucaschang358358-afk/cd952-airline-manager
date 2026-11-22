@@ -10,7 +10,7 @@
 #define AM_NUM_RIVALS    10
 #define AM_MAX_FLOG      12
 #define AM_NUM_ACH       16
-#define AM_SAVE_MAGIC    0x414D3434u /* "AM44" */
+#define AM_SAVE_MAGIC    0x414D3435u /* "AM45" */
 
 typedef struct {
     int active;
@@ -66,7 +66,7 @@ typedef struct {
     char airline_name[28];
     char iata_code[4];
     int realism_mode;
-    int speed_mult_idx; /* 0=1x, 1=10x, 2=60x, 3=360x */
+    int speed_mult_idx; /* 0=1x, 1=10x, 2=60x, 3=360x, 4=1000x */
 
     int64_t cash;
     int     pax_points; /* AM4 積分點數 (可換現金/油槽/聲譽) */
@@ -126,6 +126,21 @@ typedef struct {
     int charter_pts;
     int charter_done_cnt;
 
+    /* 員工部門與訓練等級 (對標 AM4 Staff & Training!) */
+    int staff_pilots;
+    int staff_crew;
+    int staff_engineers;
+    int staff_techs;
+    int training_points;
+    int train_mgmt_lv;    /* 管理訓練 0..5 (+2% 聲譽/級) */
+    int train_fuel_lv;    /* 節油訓練 0..5 (-2% 油耗/級) */
+    int train_maint_lv;   /* 維修訓練 0..5 (-8% 磨損/級) */
+
+    /* 外掛 / 上帝模式 (MOD / CHEAT) 開關 */
+    int cheat_god_fuel;   /* 1=無限免費油料與碳權 */
+    int cheat_no_wear;    /* 1=機隊零磨損、免 A-Check */
+    int64_t last_daily_bonus_ts;
+
     int64_t last_unix_time;
     char last_notice[96];
 } AmWorld;
@@ -181,6 +196,18 @@ void am_roll_new_charter(void);
 int  am_run_charter_with_plane(int fleet_idx, char *out_msg, int msg_sz);
 const char *am_alliance_name(int id);
 const char *am_charter_title(int type);
+
+int  am_hire_staff(int dept, int count, char *out_msg, int msg_sz); /* 0=機師, 1=空服, 2=工程師, 3=地勤 */
+int  am_upgrade_training(int track, char *out_msg, int msg_sz);    /* 0=管理, 1=節油, 2=維修 */
+int  am_claim_daily_bonus(char *out_msg, int msg_sz);
+
+/* 外掛 / 上帝模式控制 API */
+void am_cheat_add_cash(int64_t amount, char *out_msg, int msg_sz);
+void am_cheat_add_points(int pts, char *out_msg, int msg_sz);
+void am_cheat_refill_all(char *out_msg, int msg_sz);
+int  am_cheat_instant_finish_flights(char *out_msg, int msg_sz);
+void am_cheat_max_reputation(char *out_msg, int msg_sz);
+void am_cheat_unlock_all_achs(char *out_msg, int msg_sz);
 
 int         am_airline_level(void);
 const char *am_airline_rank_name(int lv);

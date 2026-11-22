@@ -243,7 +243,9 @@ void hal_dim_rect(int rx, int ry, int rw, int rh) {
     }
 }
 
-/* 智慧局部髒區更新 (Smart Dirty-Band Blit)：只重繪有變動的掃描線與文字，徹底根除整畫面閃爍！ */
+/* 60 條獨立 8px 局部髒區刷新引擎 (60-Strip Independent Dirty Blit)：
+ *  - 把 480px 螢幕切成 60 條獨立水平帶 (每條 8px)
+ *  - 若只有頂部餘額或底部提示條變動，中間 400px 的地圖與文字完全不覆寫、絕不跟著刷新閃爍！ */
 void hal_present(void) {
     if (!g_lcd || !g_lcd->surface || !g_lcd->surface->buffer || !g_backbuf) return;
     size_t row_bytes = (size_t)g_w * (g_is_xrgb ? 4u : 2u);
@@ -251,61 +253,84 @@ void hal_present(void) {
     const uint8_t *src = (const uint8_t *)g_backbuf;
     uint8_t *shd = (uint8_t *)g_front_shadow;
 
-    int y_min = g_h, y_max = -1;
+    int num_strips = (g_h + 7) / 8;
+    if (num_strips > 128) num_strips = 128;
+    uint8_t dirty[128];
+    memset(dirty, 0, sizeof(dirty));
+
     if (g_first_present || !shd) {
-        y_min = 0; y_max = g_h - 1;
+        memset(dirty, 1, (size_t)num_strips);
         g_first_present = 0;
     } else {
-        for (int y = 0; y < g_h; y++) {
-            if (memcmp(src + (size_t)y * row_bytes, shd + (size_t)y * row_bytes, row_bytes) != 0) {
-                if (y < y_min) y_min = y;
-                y_max = y;
+        /* 1. 逐條比對底圖像素 */
+        for (int s = 0; s < num_strips; s++) {
+            int y0 = s * 8, y1 = y0 + 8; if (y1 > g_h) y1 = g_h;
+            size_t off = (size_t)y0 * row_bytes;
+            size_t len = (size_t)(y1 - y0) * row_bytes;
+            if (memcmp(src + off, shd + off, len) != 0) dirty[s] = 1;
+        }
+        /* 2. 逐條標記有變動的文字條帶 (未變動的靜止文字完全不重繪!) */
+        for (int i = 0; i < g_text_q_len; i++) {
+            int matched = 0;
+            for (int j = 0; j < g_prev_text_q_len; j++) {
+                if (memcmp(&g_text_q[i], &g_prev_text_q[j], sizeof(TextCmd)) == 0) { matched = 1; break; }
+            }
+            if (!matched) {
+                int s0 = g_text_q[i].y / 8, s1 = (g_text_q[i].y + 20) / 8;
+                if (s0 < 0) s0 = 0;
+                if (s1 >= num_strips) s1 = num_strips - 1;
+                for (int s = s0; s <= s1; s++) dirty[s] = 1;
             }
         }
-        /* 比對文字層是否有增減或內容變動 */
-        if (g_text_q_len != g_prev_text_q_len ||
-            memcmp(g_text_q, g_prev_text_q, (size_t)g_text_q_len * sizeof(TextCmd)) != 0) {
-            int max_n = g_text_q_len > g_prev_text_q_len ? g_text_q_len : g_prev_text_q_len;
-            for (int i = 0; i < max_n; i++) {
-                int diff = (i >= g_text_q_len || i >= g_prev_text_q_len ||
-                            memcmp(&g_text_q[i], &g_prev_text_q[i], sizeof(TextCmd)) != 0);
-                if (diff) {
-                    if (i < g_text_q_len) {
-                        if (g_text_q[i].y < y_min) y_min = g_text_q[i].y;
-                        if (g_text_q[i].y + 20 > y_max) y_max = g_text_q[i].y + 20;
-                    }
-                    if (i < g_prev_text_q_len) {
-                        if (g_prev_text_q[i].y < y_min) y_min = g_prev_text_q[i].y;
-                        if (g_prev_text_q[i].y + 20 > y_max) y_max = g_prev_text_q[i].y + 20;
-                    }
-                }
+        for (int j = 0; j < g_prev_text_q_len; j++) {
+            int matched = 0;
+            for (int i = 0; i < g_text_q_len; i++) {
+                if (memcmp(&g_text_q[i], &g_prev_text_q[j], sizeof(TextCmd)) == 0) { matched = 1; break; }
+            }
+            if (!matched) {
+                int s0 = g_prev_text_q[j].y / 8, s1 = (g_prev_text_q[j].y + 20) / 8;
+                if (s0 < 0) s0 = 0;
+                if (s1 >= num_strips) s1 = num_strips - 1;
+                for (int s = s0; s <= s1; s++) dirty[s] = 1;
             }
         }
     }
 
-    if (y_min < 0) y_min = 0;
-    if (y_max >= g_h) y_max = g_h - 1;
+    /* 3. 只拷貝真正髒掉的水平條帶 (連續髒條帶合併一次 memcpy，中間乾淨條帶完全跳過!) */
+    int any_dirty = 0;
+    for (int s = 0; s < num_strips; ) {
+        if (!dirty[s]) { s++; continue; }
+        any_dirty = 1;
+        int e = s;
+        while (e + 1 < num_strips && dirty[e + 1]) e++;
+        int y0 = s * 8, y1 = (e + 1) * 8; if (y1 > g_h) y1 = g_h;
+        size_t off = (size_t)y0 * row_bytes;
+        size_t len = (size_t)(y1 - y0) * row_bytes;
+        memcpy(dst + off, src + off, len);
+        if (shd) memcpy(shd + off, src + off, len);
+        s = e + 1;
+    }
 
-    if (y_min <= y_max) {
-        size_t off = (size_t)y_min * row_bytes;
-        size_t span = (size_t)(y_max - y_min + 1) * row_bytes;
-        memcpy(dst + off, src + off, span);
-        if (shd) memcpy(shd + off, src + off, span);
+    /* 4. 只重畫落於髒條帶內的文字！其餘文字一像素都不動，徹底根除閃爍！ */
+    if (any_dirty && g_text_q_len > 0) {
+        SetFontType(MONOSPACE_CJK);
+        UTF16 u16[192];
+        for (int i = 0; i < g_text_q_len; i++) {
+            TextCmd *tc = &g_text_q[i];
+            int s0 = tc->y / 8, s1 = (tc->y + 19) / 8;
+            if (s0 < 0) s0 = 0;
+            if (s1 >= num_strips) s1 = num_strips - 1;
+            int hit = 0;
+            for (int s = s0; s <= s1; s++) if (dirty[s]) { hit = 1; break; }
+            if (!hit) continue;
 
-        if (g_text_q_len > 0) {
-            SetFontType(MONOSPACE_CJK);
-            UTF16 u16[192];
-            for (int i = 0; i < g_text_q_len; i++) {
-                TextCmd *tc = &g_text_q[i];
-                if (tc->y + 20 < y_min || tc->y > y_max) continue;
-                int dx = tc->x < 0 ? 0 : tc->x, mw = tc->max_w;
-                if (dx + mw > g_w) mw = g_w - dx;
-                if (mw <= 8) continue;
-                utf8_to_utf16(tc->text, (int)strlen(tc->text), u16, 192);
-                rgbSetColor(tc->fg);
-                rgbSetBkColor(tc->bg);
-                WriteAlignString(dx, tc->y, u16, mw, STR_ALIGN_LEFT, PRINT_NONE);
-            }
+            int dx = tc->x < 0 ? 0 : tc->x, mw = tc->max_w;
+            if (dx + mw > g_w) mw = g_w - dx;
+            if (mw <= 8) continue;
+            utf8_to_utf16(tc->text, (int)strlen(tc->text), u16, 192);
+            rgbSetColor(tc->fg);
+            rgbSetBkColor(tc->bg);
+            WriteAlignString(dx, tc->y, u16, mw, STR_ALIGN_LEFT, PRINT_NONE);
         }
     }
 
@@ -316,7 +341,7 @@ void hal_present(void) {
 
 int64_t hal_get_unix_time(void) { return (int64_t)time(NULL); }
 uint32_t hal_get_seed(void) { return (uint32_t)time(NULL) ^ 0xA4414952u; }
-const char *hal_get_save_path(void) { return "C:\\cd952_am4_v4.sav"; }
+const char *hal_get_save_path(void) { return "C:\\cd952_am4_v5.sav"; }
 const char *hal_get_extra_airports_csv(void) { return "C:\\airports.csv"; }
 void hal_request_quit(void) { g_running = 0; }
 
