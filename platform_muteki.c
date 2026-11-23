@@ -341,7 +341,8 @@ void hal_present(void) {
 
 int64_t hal_get_unix_time(void) { return (int64_t)time(NULL); }
 uint32_t hal_get_seed(void) { return (uint32_t)time(NULL) ^ 0xA4414952u; }
-const char *hal_get_save_path(void) { return "C:\\cd952_am4_v5.sav"; }
+const char *hal_get_save_index_path(void) { return "C:\\am4_slots.idx"; }
+void hal_get_save_slot_path(int slot, char *out, int sz) { snprintf(out, (size_t)sz, "C:\\am4_slot%d.sav", slot); }
 const char *hal_get_extra_airports_csv(void) { return "C:\\airports.csv"; }
 void hal_request_quit(void) { g_running = 0; }
 
@@ -390,6 +391,7 @@ int main(void) {
 
     ui_event_t ev = {0};
     int touch_cd = 0;
+    int drag_active = 0, drag_moved = 0, last_tx = -1, last_ty = -1;
     time_t last_sec = time(NULL);
 
     while (g_running) {
@@ -406,11 +408,30 @@ int main(void) {
                 char ch = 0;
                 AmKey k = map_key(ev.key_code0, &ch);
                 if (k != AKEY_NONE) am_ui_on_key(k, ch);
-            } else if (MUTEKI_HAS_TOUCH && MUTEKI_IS_TOUCH_DOWN(ev) && touch_cd == 0) {
+            } else if (MUTEKI_HAS_TOUCH && MUTEKI_IS_TOUCH_UP(ev)) {
+                if (drag_active && !drag_moved && touch_cd == 0 && last_tx >= 0 && last_ty >= 0) {
+                    am_ui_on_touch(last_tx, last_ty);
+                    touch_cd = 3;
+                }
+                drag_active = 0; drag_moved = 0;
+            } else if (MUTEKI_HAS_TOUCH && MUTEKI_IS_TOUCH_DOWN(ev)) {
                 int tx = MUTEKI_TOUCH_X(ev), ty = MUTEKI_TOUCH_Y(ev);
                 if (tx >= 0 && ty >= 0 && tx < g_w && ty < g_h) {
-                    am_ui_on_touch(tx, ty);
-                    touch_cd = 4;
+                    if (!drag_active) {
+                        drag_active = 1; drag_moved = 0; last_tx = tx; last_ty = ty;
+                        /* 若 SDK 未提供 UP 事件，立即觸發點擊並追蹤後續滑動 */
+                        if (!MUTEKI_IS_TOUCH_UP(ev) && touch_cd == 0) {
+                            am_ui_on_touch(tx, ty);
+                            touch_cd = 3;
+                        }
+                    } else {
+                        int dx = tx - last_tx, dy = ty - last_ty;
+                        if (abs(dx) >= 8 || abs(dy) >= 8) {
+                            drag_moved = 1;
+                            am_ui_on_touch_drag(dx, dy);
+                            last_tx = tx; last_ty = ty;
+                        }
+                    }
                 }
             }
             ClearEvent(&ev);

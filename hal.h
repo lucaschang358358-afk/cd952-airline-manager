@@ -44,10 +44,11 @@ void hal_clear_text_in_rect(int rx, int ry, int rw, int rh);
 void hal_dim_rect(int rx, int ry, int rw, int rh);
 void hal_present(void);
 
-int64_t hal_get_unix_time(void);
-uint32_t hal_get_seed(void);
-const char *hal_get_save_path(void);
+int64_t     hal_get_unix_time(void);
+uint32_t    hal_get_seed(void);
+const char *hal_get_save_index_path(void);
+void        hal_get_save_slot_path(int slot, char *out, int sz);
 const char *hal_get_extra_airports_csv(void);
-void hal_request_quit(void);
+void        hal_request_quit(void);
 
 #endif
