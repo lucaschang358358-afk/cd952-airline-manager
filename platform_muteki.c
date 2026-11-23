@@ -391,11 +391,15 @@ int main(void) {
 
     ui_event_t ev = {0};
     int touch_cd = 0;
-    int drag_active = 0, drag_moved = 0, last_tx = -1, last_ty = -1;
+    int last_tx = -1, last_ty = -1, drag_idle = 0;
     time_t last_sec = time(NULL);
 
     while (g_running) {
         if (touch_cd > 0) touch_cd--;
+        if (last_tx >= 0) {
+            drag_idle++;
+            if (drag_idle >= 6) { last_tx = -1; last_ty = -1; drag_idle = 0; }
+        }
 
         time_t now_sec = time(NULL);
         if (now_sec != last_sec) {
@@ -408,29 +412,18 @@ int main(void) {
                 char ch = 0;
                 AmKey k = map_key(ev.key_code0, &ch);
                 if (k != AKEY_NONE) am_ui_on_key(k, ch);
-            } else if (MUTEKI_HAS_TOUCH && MUTEKI_IS_TOUCH_UP(ev)) {
-                if (drag_active && !drag_moved && touch_cd == 0 && last_tx >= 0 && last_ty >= 0) {
-                    am_ui_on_touch(last_tx, last_ty);
-                    touch_cd = 3;
-                }
-                drag_active = 0; drag_moved = 0;
             } else if (MUTEKI_HAS_TOUCH && MUTEKI_IS_TOUCH_DOWN(ev)) {
                 int tx = MUTEKI_TOUCH_X(ev), ty = MUTEKI_TOUCH_Y(ev);
                 if (tx >= 0 && ty >= 0 && tx < g_w && ty < g_h) {
-                    if (!drag_active) {
-                        drag_active = 1; drag_moved = 0; last_tx = tx; last_ty = ty;
-                        /* 若 SDK 未提供 UP 事件，立即觸發點擊並追蹤後續滑動 */
-                        if (!MUTEKI_IS_TOUCH_UP(ev) && touch_cd == 0) {
-                            am_ui_on_touch(tx, ty);
-                            touch_cd = 3;
-                        }
-                    } else {
-                        int dx = tx - last_tx, dy = ty - last_ty;
-                        if (abs(dx) >= 8 || abs(dy) >= 8) {
-                            drag_moved = 1;
-                            am_ui_on_touch_drag(dx, dy);
-                            last_tx = tx; last_ty = ty;
-                        }
+                    if (last_tx >= 0 && (abs(tx - last_tx) >= 10 || abs(ty - last_ty) >= 10)) {
+                        /* 連續拖拉滑動：平滑移動地圖 */
+                        am_ui_on_touch_drag(tx - last_tx, ty - last_ty);
+                        last_tx = tx; last_ty = ty; drag_idle = 0;
+                    } else if (touch_cd == 0) {
+                        /* 完整還原 v5 原版點擊邏輯：每次點擊 100% 立即觸發！ */
+                        am_ui_on_touch(tx, ty);
+                        touch_cd = 4;
+                        last_tx = tx; last_ty = ty; drag_idle = 0;
                     }
                 }
             }
